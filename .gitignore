@@ -1,0 +1,12 @@
+# Datasets
+data/
+
+# Training artifacts
+output/
+lightning_logs/
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
