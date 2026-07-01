@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import StandardScaler
 
 
@@ -67,12 +68,16 @@ def l1_rank(x: np.ndarray, y: np.ndarray, C: float = 0.05,
             max_iter: int = 2000) -> np.ndarray:
     """Rank feature columns by max |coef| across classes from an L1 logreg.
 
-    Uses the ``liblinear`` (one-vs-rest) L1 solver, which is dramatically faster
-    than ``saga`` for this problem size and gives an equivalent ranking.
+    Uses the ``liblinear`` L1 solver wrapped in an explicit one-vs-rest scheme,
+    which is dramatically faster than ``saga`` for this problem size and gives an
+    equivalent ranking.  (Newer scikit-learn no longer lets ``liblinear`` do
+    multiclass implicitly, so the OvR wrapper is now required.)
     """
     sc = StandardScaler().fit(x)
-    clf = LogisticRegression(
+    base = LogisticRegression(
         penalty='l1', solver='liblinear', C=C, max_iter=max_iter,
-    ).fit(sc.transform(x), y)
-    imp = np.abs(clf.coef_).max(0)
+    )
+    clf = OneVsRestClassifier(base).fit(sc.transform(x), y)
+    coef = np.vstack([est.coef_.ravel() for est in clf.estimators_])  # (K, F)
+    imp = np.abs(coef).max(0)
     return np.argsort(-imp)
