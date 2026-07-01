@@ -1,0 +1,20 @@
+SFBS o6 dim=305 universe=L1top42 STOP=25 SELECT=20..29 VERIFY=30..39
+  start k=42 selCV=0.9486
+  - drop 293 -> k=41 selCV=0.9487
+  - drop 288 -> k=40 selCV=0.9489
+  + add  288 -> k=41 selCV=0.9488
+  + add  293 -> k=42 selCV=0.9486
+  - drop 293 -> k=41 selCV=0.9488
+  - drop 288 -> k=40 selCV=0.9489
+  - drop 296 -> k=39 selCV=0.9491
+  + add  296 -> k=40 selCV=0.9490
+  + add  288 -> k=41 selCV=0.9489
+  - drop 288 -> k=40 selCV=0.9490
+  - drop 295 -> k=39 selCV=0.9491
+  - drop 145 -> k=38 selCV=0.9490
+  - drop 98 -> k=37 selCV=0.9488
+  - drop 29 -> k=36 selCV=0.9487
+  - drop 81 -> k=35 selCV=0.9487
+  + add  98 -> k=36 selCV=0.9487
+  + add  81 -> k=37 selCV=0.9488
+  - drop 81 -> k=36 selCV=0.9487
