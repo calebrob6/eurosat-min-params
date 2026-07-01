@@ -56,7 +56,10 @@ SELECT_SEEDS = list(range(_SEL0, _SEL0 + _NSEED))
 VERIFY_SEEDS = list(range(_VER0, _VER0 + _NSEED))
 STOP = int(os.environ.get('STOP', '24'))
 FOLDS = 5
-C = 10.0
+# C defaults to 10.0 (the value the K28 subsets below were derived with); set the
+# C env var to re-run the low-k drops under a different inverse-L2 strength while
+# keeping the same verified k=28 starting subset (iteration-10 C-per-k probe).
+C = float(os.environ.get('C', '10.0'))
 THRESH = 0.940
 WORKERS = int(os.environ.get('WORKERS', '18'))
 
@@ -74,8 +77,9 @@ def main():
     cur = list(K28[_SEL0])
     assert len(cur) == 28, len(cur)
 
+    _ctag = '' if C == 10.0 else f'_C{C:g}'
     outpath = os.path.join(os.path.dirname(__file__),
-                           f'extend_lowk_s{_SEL0}_result.txt')
+                           f'extend_lowk_s{_SEL0}{_ctag}_result.txt')
     out = open(outpath, 'w')
 
     def emit(msg):
@@ -83,7 +87,7 @@ def main():
         out.write(msg + '\n')
         out.flush()
 
-    emit(f'EXTEND o6 dim={ftr.shape[1]} from k=28 to STOP={STOP} '
+    emit(f'EXTEND o6 dim={ftr.shape[1]} from k=28 to STOP={STOP} C={C:g} '
          f'SELECT={SELECT_SEEDS[0]}..{SELECT_SEEDS[-1]} '
          f'VERIFY={VERIFY_SEEDS[0]}..{VERIFY_SEEDS[-1]}')
     emit(f'{"k":>4} {"params":>7} {"selCV":>7} {"verCV":>7} {"val":>7} {"test":>7}'
