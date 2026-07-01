@@ -77,6 +77,9 @@ def build_pool(split):
     parts = [np.load(os.path.join(CACHE_DIR, f'{split}_feat_o6.npy'))]
     if POOL == 'o6+ixcoh':
         parts.append(_family(split, 'ixcoh'))
+    elif POOL == 'o6+line':
+        # iteration-13 global-line (Hough) family, cached by line_features_lib
+        parts.append(np.load(os.path.join(CACHE_DIR, f'{split}_linefam_line.npy')))
     elif POOL != 'o6':
         raise ValueError(POOL)
     return np.concatenate(parts, 1).astype(np.float32)

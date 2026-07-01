@@ -9,6 +9,7 @@ arithmetic on the raw bands.
 from __future__ import annotations
 
 import numpy as np
+from scipy.sparse import csr_matrix
 
 from .data import B_BLUE, B_GREEN, B_NIR, B_RED, B_SWIR1, B_SWIR2
 
@@ -294,6 +295,98 @@ def index_texture_features(imgs: np.ndarray) -> tuple[np.ndarray, list[str]]:
     return feats.astype(np.float32), names
 
 
+# --- global straight-line (Hough) features ---------------------------------
+
+_HOUGH_NTHETA = 60      # orientation resolution over [0, pi)
+_HOUGH_RHO_BIN = 2.0    # rho quantisation, pixels
+_HOUGH_EDGE_PCTL = 85.0  # per-patch gradient percentile => edge pixels
+
+
+def _chan_grad_mag(chan: np.ndarray) -> np.ndarray:
+    """Per-pixel gradient magnitude of a single-channel stack (N, H, W)."""
+    gx = np.diff(chan, axis=2)[:, :-1, :]
+    gy = np.diff(chan, axis=1)[:, :, :-1]
+    return np.sqrt(gx * gx + gy * gy)
+
+
+def _hough_matrix(h: int, w: int, ntheta: int, rho_bin: float):
+    """CSR projection matrix ``M`` s.t. the Hough accumulator of a flattened edge
+    image ``e`` is ``M @ e``.  Each pixel votes for one (theta, rho) bin per
+    angle; built once and reused for every patch (the pixel grid is fixed)."""
+    ys, xs = np.mgrid[0:h, 0:w]
+    xs = xs.ravel().astype(np.float64)
+    ys = ys.ravel().astype(np.float64)
+    hw = h * w
+    thetas = np.linspace(0.0, np.pi, ntheta, endpoint=False)
+    diag = np.hypot(h, w)
+    nrho = int(np.ceil(2 * diag / rho_bin)) + 1
+    rows = np.empty((ntheta, hw), np.int64)
+    for t, th in enumerate(thetas):
+        rho = xs * np.cos(th) + ys * np.sin(th)
+        b = np.floor((rho + diag) / rho_bin).astype(np.int64)
+        np.clip(b, 0, nrho - 1, out=b)
+        rows[t] = t * nrho + b
+    row = rows.reshape(-1)
+    col = np.tile(np.arange(hw), ntheta)
+    data = np.ones(row.shape[0], np.float32)
+    return csr_matrix((data, (row, col)), shape=(ntheta * nrho, hw)), nrho, diag
+
+
+def _hough_line_stats(chan: np.ndarray, chunk: int = 4000):
+    """(peakfrac, peaklen, top3frac) global-line stats for a stack (N, H, W).
+
+    ``peakfrac`` = longest straight line length / edge-pixel count; ``peaklen`` =
+    longest line / patch diagonal; ``top3frac`` = sum of the best line at the 3
+    strongest orientations / edge count.  Zero learned parameters.
+    """
+    n = chan.shape[0]
+    mag = _chan_grad_mag(chan)
+    he, we = mag.shape[1], mag.shape[2]
+    thr = np.percentile(mag.reshape(n, -1), _HOUGH_EDGE_PCTL, axis=1)
+    edge = (mag > thr[:, None, None]).astype(np.float32)
+    edge_flat = edge.reshape(n, -1)
+    ecount = edge_flat.sum(1) + _EPS
+    M, nrho, diag = _hough_matrix(he, we, _HOUGH_NTHETA, _HOUGH_RHO_BIN)
+    ntheta = _HOUGH_NTHETA
+    peak = np.empty(n, np.float32)
+    top3 = np.empty(n, np.float32)
+    for s in range(0, n, chunk):
+        acc = (M @ edge_flat[s:s + chunk].T).reshape(ntheta, nrho, -1)
+        per_angle = acc.max(1)
+        peak[s:s + chunk] = per_angle.max(0)
+        top3[s:s + chunk] = np.sort(per_angle, 0)[-3:].sum(0)
+    return ((peak / ecount).astype(np.float32),
+            (peak / diag).astype(np.float32),
+            (top3 / ecount).astype(np.float32))
+
+
+def hough_line_features(imgs: np.ndarray) -> tuple[np.ndarray, list[str]]:
+    """Global straight-line (Hough) statistics on pan + NDVI + NDBI channels.
+
+    Every directional feature already in the pool (coherence, orientation
+    entropy/histogram, their index-map variants) is *local* -- an aggregate of
+    per-pixel gradient directions.  Many short parallel edges (crop rows) and one
+    long streak (a Highway, a River) can look identical to those.  This family
+    measures *global collinearity* via a Hough transform (== Radon of the binary
+    edge image): a run of ``L`` collinear edge pixels makes an accumulator peak of
+    value ``L``, so the peak is the length of the single longest straight line in
+    the patch -- an axis no local statistic sees.  ``3 channels * 3 stats = 9``
+    features, zero learned parameters.
+    """
+    b = imgs.astype(np.float32)
+    pan = b.mean(1)
+    nir, red = b[:, B_NIR], b[:, B_RED]
+    sw1 = b[:, B_SWIR1]
+    ndvi = (nir - red) / (nir + red + _EPS)
+    ndbi = (sw1 - nir) / (sw1 + nir + _EPS)
+    parts, names = [], []
+    for cname, chan in (('pan', pan), ('ndvi', ndvi), ('ndbi', ndbi)):
+        pf, pl, t3 = _hough_line_stats(chan)
+        parts += [pf[:, None], pl[:, None], t3[:, None]]
+        names += [f'linepf_{cname}', f'linepl_{cname}', f'linet3_{cname}']
+    return np.concatenate(parts, 1).astype(np.float32), names
+
+
 def patch_features(
     imgs: np.ndarray,
     pcts: tuple[int, ...] = (10, 25, 50, 75, 90),
@@ -304,6 +397,7 @@ def patch_features(
     spectral_peak: bool = False,
     xband: bool = False,
     index_texture: bool = False,
+    hough_lines: bool = False,
 ) -> tuple[np.ndarray, list[str]]:
     """Rich fixed (zero-parameter) per-patch descriptor.
 
@@ -358,4 +452,8 @@ def patch_features(
         ix, ix_names = index_texture_features(imgs)
         parts.append(ix)
         names += ix_names
+    if hough_lines:
+        hl, hl_names = hough_line_features(imgs)
+        parts.append(hl)
+        names += hl_names
     return np.concatenate(parts, 1).astype(np.float32), names
