@@ -84,10 +84,43 @@ def _grad_mag(imgs: np.ndarray) -> np.ndarray:
     return np.sqrt(gx * gx + gy * gy)
 
 
+def coherence_features(
+    imgs: np.ndarray, scales: int = 2, eps: float = 1e-6,
+) -> tuple[np.ndarray, list[str]]:
+    """Structure-tensor *coherence* per band and scale (zero parameters).
+
+    The structure tensor ``[[Sxx, Sxy], [Sxy, Syy]]`` (patch sums of gradient
+    outer products) has coherence ``sqrt((Sxx-Syy)^2 + 4 Sxy^2)/(Sxx+Syy)`` in
+    ``[0, 1]``: high when the local gradient field is *directional* (linear
+    structures like roads / Highway), low when isotropic (fields, forest).  This
+    captures orientation information absent from the magnitude-only gradient
+    statistics in :func:`patch_features`, and empirically lets a linear model hit
+    the same accuracy with fewer selected features.
+
+    Returns ``(features [N, 13*scales], names)``.
+    """
+    parts: list[np.ndarray] = []
+    names: list[str] = []
+    c = imgs.shape[1]
+    cur = imgs
+    for s in range(scales):
+        gx = np.diff(cur, axis=3)[:, :, :-1, :]
+        gy = np.diff(cur, axis=2)[:, :, :, :-1]
+        sxx = (gx * gx).mean((2, 3))
+        syy = (gy * gy).mean((2, 3))
+        sxy = (gx * gy).mean((2, 3))
+        coh = np.sqrt((sxx - syy) ** 2 + 4 * sxy * sxy) / (sxx + syy + eps)
+        parts.append(coh.astype(np.float32))
+        names += [f'coh{s}_b{i}' for i in range(c)]
+        cur = _pool2(cur)
+    return np.concatenate(parts, 1), names
+
+
 def patch_features(
     imgs: np.ndarray,
     pcts: tuple[int, ...] = (10, 25, 50, 75, 90),
     grad_scales: int = 3,
+    coherence_scales: int = 0,
 ) -> tuple[np.ndarray, list[str]]:
     """Rich fixed (zero-parameter) per-patch descriptor.
 
@@ -118,4 +151,8 @@ def patch_features(
         parts += [g.mean(2), g.std(2)]
         names += [f'g{s}mean_b{i}' for i in range(c)] + [f'g{s}std_b{i}' for i in range(c)]
         cur = _pool2(cur)
+    if coherence_scales:
+        coh, coh_names = coherence_features(imgs, scales=coherence_scales)
+        parts.append(coh)
+        names += coh_names
     return np.concatenate(parts, 1).astype(np.float32), names
