@@ -1,0 +1,91 @@
+"""EuroSAT data loading utilities.
+
+The EuroSAT dataset ships as 27,000 64x64 patches with 13 Sentinel-2 bands each
+(``uint16`` GeoTIFFs).  The official train/val/test split is provided as three
+text files listing ``<Class>_<id>.jpg`` filenames; we map those to the
+corresponding 13-band ``.tif`` files.
+
+Band order (torchgeo ``EuroSAT.all_band_names``):
+    0:B01 1:B02(blue) 2:B03(green) 3:B04(red) 4:B05 5:B06 6:B07
+    7:B08(nir) 8:B08A 9:B09 10:B10 11:B11(swir1) 12:B12(swir2)
+"""
+
+from __future__ import annotations
+
+import os
+from concurrent.futures import ProcessPoolExecutor
+
+import numpy as np
+import rasterio
+
+# --- constants -------------------------------------------------------------
+
+CLASSES = [
+    'AnnualCrop',
+    'Forest',
+    'HerbaceousVegetation',
+    'Highway',
+    'Industrial',
+    'Pasture',
+    'PermanentCrop',
+    'Residential',
+    'River',
+    'SeaLake',
+]
+CLASS_TO_IDX = {c: i for i, c in enumerate(CLASSES)}
+NUM_CLASSES = len(CLASSES)
+
+BAND_NAMES = [
+    'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
+    'B08', 'B08A', 'B09', 'B10', 'B11', 'B12',
+]
+# Common semantic band indices.
+B_BLUE, B_GREEN, B_RED, B_NIR, B_SWIR1, B_SWIR2 = 1, 2, 3, 7, 11, 12
+
+DATA_ROOT = os.path.join(os.path.dirname(__file__), '..', 'data', 'EuroSAT')
+DATA_ROOT = os.path.abspath(DATA_ROOT)
+TIF_ROOT = os.path.join(
+    DATA_ROOT, 'ds', 'images', 'remote_sensing',
+    'otherDatasets', 'sentinel_2', 'tif',
+)
+SPLIT_FILES = {
+    'train': os.path.join(DATA_ROOT, 'eurosat-train.txt'),
+    'val': os.path.join(DATA_ROOT, 'eurosat-val.txt'),
+    'test': os.path.join(DATA_ROOT, 'eurosat-test.txt'),
+}
+
+
+def _class_of(filename: str) -> str:
+    """Class name is the prefix before the final ``_<id>``."""
+    base = filename.rsplit('.', 1)[0]
+    return base.rsplit('_', 1)[0]
+
+
+def list_split(split: str) -> tuple[list[str], np.ndarray]:
+    """Return (tif paths, integer labels) for a split ('train'|'val'|'test')."""
+    paths: list[str] = []
+    labels: list[int] = []
+    with open(SPLIT_FILES[split]) as f:
+        for line in f:
+            name = line.strip()
+            if not name:
+                continue
+            cls = _class_of(name)
+            stem = name.rsplit('.', 1)[0]
+            paths.append(os.path.join(TIF_ROOT, cls, stem + '.tif'))
+            labels.append(CLASS_TO_IDX[cls])
+    return paths, np.asarray(labels, dtype=np.int64)
+
+
+def read_tif(path: str) -> np.ndarray:
+    """Read a 13-band patch as a ``float32`` array of shape (13, 64, 64)."""
+    with rasterio.open(path) as src:
+        return src.read().astype(np.float32)
+
+
+def load_images(split: str, max_workers: int = 16) -> tuple[np.ndarray, np.ndarray]:
+    """Load all raw patches for a split as (N, 13, 64, 64) float32 + labels."""
+    paths, labels = list_split(split)
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        imgs = list(ex.map(read_tif, paths, chunksize=32))
+    return np.stack(imgs).astype(np.float32), labels
