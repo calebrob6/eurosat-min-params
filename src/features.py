@@ -205,6 +205,42 @@ def spectral_peak_features(
     return np.log1p(feat).astype(np.float32), names
 
 
+# informative Sentinel-2 band pairs for cross-band joint spatial structure
+_XBAND_PAIRS = [
+    (B_RED, B_NIR), (B_GREEN, B_NIR), (B_BLUE, B_NIR),
+    (B_SWIR1, B_NIR), (B_RED, B_SWIR1), (B_GREEN, B_RED),
+    (B_NIR, B_SWIR2), (B_SWIR1, B_SWIR2),
+]
+
+
+def xband_corr_features(
+    imgs: np.ndarray, pairs=_XBAND_PAIRS, eps: float = 1e-6,
+) -> tuple[np.ndarray, list[str]]:
+    """Pearson spatial correlation of band pairs over the patch pixels.
+
+    ``corr = mean((a-abar)(b-bbar)) / (std_a std_b)`` over the 64x64 pixels, one
+    feature per band pair.  Every other feature in this module is computed one
+    band at a time; this is the only family that looks at the *joint* spatial
+    structure of two bands, i.e. whether their patterns co-vary.  Vegetation
+    couples RED/NIR very differently from built-up or water, so a handful of these
+    correlations is a discriminative axis orthogonal to all the per-band
+    intensity, gradient, coherence and orientation statistics.  ``len(pairs)``
+    features, zero learned parameters.
+
+    Returns ``(features [N, len(pairs)], names)``.
+    """
+    n, c = imgs.shape[:2]
+    flat = imgs.reshape(n, c, -1)
+    z = flat - flat.mean(2, keepdims=True)
+    sd = np.sqrt((z * z).mean(2)) + eps                     # (N, C)
+    parts, names = [], []
+    for a, b in pairs:
+        cov = (z[:, a] * z[:, b]).mean(1)
+        parts.append((cov / (sd[:, a] * sd[:, b])).astype(np.float32)[:, None])
+        names.append(f'xcorr_b{a}_b{b}')
+    return np.concatenate(parts, 1), names
+
+
 def patch_features(
     imgs: np.ndarray,
     pcts: tuple[int, ...] = (10, 25, 50, 75, 90),
@@ -213,6 +249,7 @@ def patch_features(
     orient_entropy_bins: int = 0,
     orient_hist_bins: int = 0,
     spectral_peak: bool = False,
+    xband: bool = False,
 ) -> tuple[np.ndarray, list[str]]:
     """Rich fixed (zero-parameter) per-patch descriptor.
 
@@ -259,4 +296,8 @@ def patch_features(
         sp, sp_names = spectral_peak_features(imgs)
         parts.append(sp)
         names += sp_names
+    if xband:
+        xb, xb_names = xband_corr_features(imgs)
+        parts.append(xb)
+        names += xb_names
     return np.concatenate(parts, 1).astype(np.float32), names
