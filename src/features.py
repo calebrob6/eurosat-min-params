@@ -241,6 +241,59 @@ def xband_corr_features(
     return np.concatenate(parts, 1), names
 
 
+def _index_maps(imgs: np.ndarray) -> tuple[np.ndarray, list[str]]:
+    """Per-pixel normalised-difference index maps, shape (N, 6, H, W)."""
+    b = imgs
+    nir, red, grn, blu = b[:, B_NIR], b[:, B_RED], b[:, B_GREEN], b[:, B_BLUE]
+    sw1, sw2 = b[:, B_SWIR1], b[:, B_SWIR2]
+    ndvi = _ratio(nir, red)
+    ndwi = _ratio(grn, nir)
+    ndbi = _ratio(sw1, nir)
+    ndmi = _ratio(nir, sw1)
+    nbr = _ratio(nir, sw2)
+    bsi = ((sw1 + red) - (nir + blu)) / ((sw1 + red) + (nir + blu) + _EPS)
+    maps = np.stack([ndvi, ndwi, ndbi, ndmi, nbr, bsi], axis=1)  # (N, 6, H, W)
+    return maps.astype(np.float32), ['ndvi', 'ndwi', 'ndbi', 'ndmi', 'nbr', 'bsi']
+
+
+def index_texture_features(imgs: np.ndarray) -> tuple[np.ndarray, list[str]]:
+    """Spatial-heterogeneity summary of each per-pixel spectral-index map.
+
+    Every *other* index feature (in :func:`spectral_features`) is a per-band
+    *mean* ratio -- one scalar NDVI/NDWI/... per patch -- discarding all within-
+    patch spatial structure.  This family instead computes the per-pixel index
+    map (e.g. ``NDVI(x, y)``) and summarises how uniform vs mixed it is across the
+    64x64 patch: for each of 6 indices the spatial ``std``, gradient-magnitude
+    ``mean`` and ``std``, and robust spread ``p90 - p10``.  ``6 * 4 = 24``
+    features, zero learned parameters.
+
+    Physical intuition: a managed PermanentCrop patch is near-uniform in NDVI
+    while HerbaceousVegetation varies pixel-to-pixel; a Highway is a sharp
+    low-NDVI streak (high NDVI *gradient*) across a vegetated background.  None of
+    that is visible to a mean index, so this axis is orthogonal to every per-band
+    intensity/gradient/coherence/orientation statistic and to the cross-band
+    correlation family -- and it is the single strongest parameter-free family
+    found, dropping the honest CV>=0.940 floor from k=38 to k=34.
+
+    Returns ``(features [N, 24], names)``.
+    """
+    maps, inames = _index_maps(imgs)
+    n, k = maps.shape[:2]
+    flat = maps.reshape(n, k, -1)
+    std = flat.std(2)
+    g = _grad_mag(maps).reshape(n, k, -1)
+    gmean = g.mean(2)
+    gstd = g.std(2)
+    p10, p90 = np.percentile(flat, [10, 90], axis=2)
+    spread = p90 - p10
+    feats = np.concatenate([std, gmean, gstd, spread], axis=1)
+    names = ([f'ixstd_{s}' for s in inames]
+             + [f'ixgm_{s}' for s in inames]
+             + [f'ixgs_{s}' for s in inames]
+             + [f'ixspr_{s}' for s in inames])
+    return feats.astype(np.float32), names
+
+
 def patch_features(
     imgs: np.ndarray,
     pcts: tuple[int, ...] = (10, 25, 50, 75, 90),
@@ -250,6 +303,7 @@ def patch_features(
     orient_hist_bins: int = 0,
     spectral_peak: bool = False,
     xband: bool = False,
+    index_texture: bool = False,
 ) -> tuple[np.ndarray, list[str]]:
     """Rich fixed (zero-parameter) per-patch descriptor.
 
@@ -300,4 +354,8 @@ def patch_features(
         xb, xb_names = xband_corr_features(imgs)
         parts.append(xb)
         names += xb_names
+    if index_texture:
+        ix, ix_names = index_texture_features(imgs)
+        parts.append(ix)
+        names += ix_names
     return np.concatenate(parts, 1).astype(np.float32), names
