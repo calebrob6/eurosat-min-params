@@ -9,6 +9,7 @@ arithmetic on the raw bands.
 from __future__ import annotations
 
 import numpy as np
+from scipy.ndimage import uniform_filter
 from scipy.sparse import csr_matrix
 
 from .data import B_BLUE, B_GREEN, B_NIR, B_RED, B_SWIR1, B_SWIR2
@@ -387,6 +388,58 @@ def hough_line_features(imgs: np.ndarray) -> tuple[np.ndarray, list[str]]:
     return np.concatenate(parts, 1).astype(np.float32), names
 
 
+# --- Harris corner / junction features --------------------------------------
+
+def _harris_corner_stats(chan: np.ndarray):
+    """(cornfrac, cornmag) Harris corner stats for a stack (N, H, W).
+
+    Structure tensor of the per-pixel gradients, box-smoothed 3x3; Harris
+    response ``R = det - 0.05 * trace**2``.  ``cornfrac`` = fraction of
+    strong-gradient pixels (trace above the per-patch median) with ``R > 0``;
+    ``cornmag`` = sum of ``sqrt(R+)`` normalised by the trace budget (scale
+    invariant).  Zero learned parameters.
+    """
+    gx = np.gradient(chan, axis=2)
+    gy = np.gradient(chan, axis=1)
+    jxx = uniform_filter(gx * gx, size=(1, 3, 3))
+    jyy = uniform_filter(gy * gy, size=(1, 3, 3))
+    jxy = uniform_filter(gx * gy, size=(1, 3, 3))
+    tr = jxx + jyy
+    resp = (jxx * jyy - jxy * jxy) - 0.05 * tr * tr
+    n = chan.shape[0]
+    tr_f = tr.reshape(n, -1)
+    resp_f = resp.reshape(n, -1)
+    act = tr_f > np.median(tr_f, axis=1)[:, None]
+    nact = act.sum(1) + _EPS
+    frac = ((resp_f > 0) & act).sum(1) / nact
+    mag = np.sqrt(np.clip(resp_f, 0, None)).sum(1) / (tr_f.sum(1) + _EPS)
+    return frac.astype(np.float32), mag.astype(np.float32)
+
+
+def harris_corner_features(imgs: np.ndarray) -> tuple[np.ndarray, list[str]]:
+    """Harris corner/junction density on pan + NDVI + NDBI channels.
+
+    Corners occur where edges MEET -- a global-layout axis nothing else in the
+    pool sees: local directional statistics (coherence, orientation entropy)
+    aggregate isolated gradient directions, and the Hough family sees straight
+    lines, but neither distinguishes a grid of city blocks (many junctions)
+    from parallel crop rows (edges that never cross).  ``3 channels * 2 stats
+    = 6`` features, zero learned parameters.
+    """
+    b = imgs.astype(np.float32)
+    pan = b.mean(1)
+    nir, red = b[:, B_NIR], b[:, B_RED]
+    sw1 = b[:, B_SWIR1]
+    ndvi = (nir - red) / (nir + red + _EPS)
+    ndbi = (sw1 - nir) / (sw1 + nir + _EPS)
+    parts, names = [], []
+    for cname, chan in (('pan', pan), ('ndvi', ndvi), ('ndbi', ndbi)):
+        fr, mg = _harris_corner_stats(chan)
+        parts += [fr[:, None], mg[:, None]]
+        names += [f'corn2frac_{cname}', f'corn2mag_{cname}']
+    return np.concatenate(parts, 1).astype(np.float32), names
+
+
 def patch_features(
     imgs: np.ndarray,
     pcts: tuple[int, ...] = (10, 25, 50, 75, 90),
@@ -398,6 +451,7 @@ def patch_features(
     xband: bool = False,
     index_texture: bool = False,
     hough_lines: bool = False,
+    harris_corners: bool = False,
 ) -> tuple[np.ndarray, list[str]]:
     """Rich fixed (zero-parameter) per-patch descriptor.
 
@@ -456,4 +510,8 @@ def patch_features(
         hl, hl_names = hough_line_features(imgs)
         parts.append(hl)
         names += hl_names
+    if harris_corners:
+        hc, hc_names = harris_corner_features(imgs)
+        parts.append(hc)
+        names += hc_names
     return np.concatenate(parts, 1).astype(np.float32), names

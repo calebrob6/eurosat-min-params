@@ -80,6 +80,11 @@ def build_pool(split):
     elif POOL == 'o6+line':
         # iteration-13 global-line (Hough) family, cached by line_features_lib
         parts.append(np.load(os.path.join(CACHE_DIR, f'{split}_linefam_line.npy')))
+    elif POOL.startswith('o6+line+'):
+        # o6 + line + one iteration-15 gstruct2 family (blob2/corn2/lbp2/sslope2)
+        parts.append(np.load(os.path.join(CACHE_DIR, f'{split}_linefam_line.npy')))
+        fam = POOL.split('+')[2]
+        parts.append(np.load(os.path.join(CACHE_DIR, f'{split}_gs2fam_{fam}.npy')))
     elif POOL != 'o6':
         raise ValueError(POOL)
     return np.concatenate(parts, 1).astype(np.float32)
@@ -147,17 +152,26 @@ def main():
     emit(f'{"k":>4} {"params":>7} {"selCV":>7} {"verCV":>7} {"val":>7} {"test":>7}'
          f'  {"dropped":>10}')
 
+    # Per-row verCV / selCV-full / val / test are diagnostics only (they never
+    # steer the greedy path).  On a loaded machine, skip them while k is above
+    # DIAG_MIN_K (default 10**9 = never skip, the historical behaviour); skipped
+    # rows record -1 and so can never qualify for the honest floor.
+    diag_min_k = int(os.environ.get('DIAG_MIN_K', str(10**9)))
+
     trace = []
     ex = ProcessPoolExecutor(max_workers=WORKERS, initializer=_init, initargs=(ftr, ytr))
     # evaluate the starting set
     k = len(cur)
     while True:
-        w, b, fi = fit_folded_logreg(ftr, ytr, feature_idx=cur, C=C)
-        ver = _cv_seeds(ftr, ytr, cur, VERIFY_SEEDS)
-        va = accuracy_score(yva, predict(fva, w, b, fi))
-        te = accuracy_score(yte, predict(fte, w, b, fi))
-        # SELECT-CV of the full current set
-        sel_full = _cv_seeds(ftr, ytr, cur, SELECT_SEEDS)
+        if len(cur) <= diag_min_k:
+            w, b, fi = fit_folded_logreg(ftr, ytr, feature_idx=cur, C=C)
+            ver = _cv_seeds(ftr, ytr, cur, VERIFY_SEEDS)
+            va = accuracy_score(yva, predict(fva, w, b, fi))
+            te = accuracy_score(yte, predict(fte, w, b, fi))
+            # SELECT-CV of the full current set
+            sel_full = _cv_seeds(ftr, ytr, cur, SELECT_SEEDS)
+        else:
+            ver = va = te = sel_full = -1.0
         trace.append((len(cur), 10 * (len(cur) + 1), sel_full, ver, va, te, list(cur)))
         n_ix = sum(1 for f in cur if f >= o6_dim)
         emit(f'{len(cur):>4} {10*(len(cur)+1):>7} {sel_full:>7.4f} {ver:>7.4f} '
