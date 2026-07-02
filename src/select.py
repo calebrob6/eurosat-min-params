@@ -85,6 +85,7 @@ def backward_eliminate(
     folds: int = 5,
     C: float = 10.0,
     workers: int | None = None,
+    record: bool = False,
 ):
     """Greedy backward elimination from ``init_idx`` down to ``target_k`` features.
 
@@ -100,18 +101,25 @@ def backward_eliminate(
         select_seeds: CV shuffle seeds guiding the greedy removals.
         folds, C: CV folds and logreg inverse-L2 strength.
         workers: process-pool size (defaults to min(16, cpu-2)).
+        record: also return every intermediate subset (to confirm a whole k
+            neighbourhood from a single descent instead of one descent per k).
 
     Returns:
-        (feature_idx [target_k] into the pool, trace) where ``trace`` is a list of
-        ``(k, select_cv)`` from ``len(init_idx)`` down to ``target_k``.
+        ``(feature_idx [target_k], trace)`` where ``trace`` is a list of
+        ``(k, select_cv)`` from ``len(init_idx)`` down to ``target_k``.  If
+        ``record`` is set, also returns a third value ``subsets``: a dict mapping
+        each visited ``k`` to the ``np.ndarray`` of feature indices at that k.
     """
     idx = np.asarray(init_idx).copy()
     seeds = list(select_seeds)
     workers = workers or min(16, (os.cpu_count() or 4) - 2)
     trace: list[tuple[int, float]] = []
+    subsets: dict[int, np.ndarray] = {}
     with ProcessPoolExecutor(max_workers=workers,
                              initializer=_init, initargs=(x, y)) as ex:
         while True:
+            if record:
+                subsets[len(idx)] = idx.copy()
             trace.append((len(idx), mean_cv(x, y, idx, seeds, folds, C)))
             if len(idx) <= target_k:
                 break
@@ -119,6 +127,8 @@ def backward_eliminate(
             results = list(ex.map(_drop_score, args))
             best_j, _ = max(results, key=lambda t: t[1])
             idx = np.delete(idx, best_j)
+    if record:
+        return idx, trace, subsets
     return idx, trace
 
 
