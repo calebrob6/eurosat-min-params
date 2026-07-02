@@ -64,6 +64,36 @@ def num_params(w_eff: np.ndarray, b_eff: np.ndarray) -> int:
     return int(w_eff.size + b_eff.size)
 
 
+def to_reference_class(w_eff: np.ndarray, b_eff: np.ndarray,
+                       ref: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """Reparameterize a K-class head to (K-1) rows with a 0-logit reference.
+
+    A softmax/argmax head is shift-invariant: subtracting class ``ref``'s row
+    from every row leaves argmax (and softmax probabilities) unchanged and makes
+    row ``ref`` identically zero, so it need not be stored.  The honest stored
+    parameter count of a K-class linear head is therefore ``(K-1) * (F + 1)``.
+
+    Returns:
+        (W_ref [K-1, k], b_ref [K-1]) — rows for every class except ``ref``, in
+        original class order with ``ref`` removed.
+    """
+    w_ref = np.delete(w_eff - w_eff[ref], ref, axis=0)
+    b_ref = np.delete(b_eff - b_eff[ref], ref)
+    return w_ref.astype(w_eff.dtype), b_ref.astype(b_eff.dtype)
+
+
+def predict_reference_class(x: np.ndarray, w_ref: np.ndarray, b_ref: np.ndarray,
+                            feature_idx: np.ndarray, ref: int = 0) -> np.ndarray:
+    """Predict class indices from a (K-1)-row reference-class head.
+
+    Class ``ref`` has an implicit constant 0 logit; the stored rows cover the
+    remaining classes in original order.
+    """
+    l_rest = x[:, feature_idx] @ w_ref.T + b_ref
+    logits = np.insert(l_rest, ref, 0.0, axis=1)
+    return logits.argmax(1)
+
+
 def l1_rank(x: np.ndarray, y: np.ndarray, C: float = 0.05,
             max_iter: int = 2000, random_state: int = 0) -> np.ndarray:
     """Rank feature columns by max |coef| across classes from an L1 logreg.
