@@ -46,7 +46,12 @@ def main():
     ap.add_argument('--select-seeds', type=int, nargs='+', default=[0, 1, 2])
     ap.add_argument('--C', type=float, default=10.0)
     ap.add_argument('--workers', type=int, default=12)
+    ap.add_argument('--families', type=str, default=None,
+                    help='comma-separated family cache stems (default: full mega pool)')
     args = ap.parse_args()
+    global FAMILIES
+    if args.families:
+        FAMILIES = args.families.split(',')
 
     ftr, fva, fte = pool('train'), pool('val'), pool('test')
     ytr = np.load(os.path.join(CACHE_DIR, 'train_y.npy'))
