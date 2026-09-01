@@ -1,0 +1,29 @@
+Spectral-angle texture prescreen on frozen 33-feature frontier
+train-only select CV seeds=0..2; C=3; test not loaded
+baseline select_cv=0.9620 validation=0.9617
+
+                           candidate   selCV      dCV     val     dval
+                 sam_edge_std_s4_all  0.9624  +0.0004  0.9626  +0.0009
+                 sam_edge_p90_s2_all  0.9623  +0.0003  0.9622  +0.0006
+                sam_edge_std_s4_key6  0.9623  +0.0003  0.9613  -0.0004
+                sam_edge_mean_s1_all  0.9622  +0.0002  0.9611  -0.0006
+               sam_edge_mean_s1_key6  0.9622  +0.0002  0.9617  +0.0000
+                sam_edge_mean_s4_all  0.9621  +0.0002  0.9624  +0.0007
+                 sam_edge_std_s2_all  0.9621  +0.0001  0.9624  +0.0007
+                sam_edge_std_s2_key6  0.9621  +0.0001  0.9613  -0.0004
+                 sam_edge_p90_s4_all  0.9621  +0.0001  0.9609  -0.0007
+               sam_edge_mean_s2_key6  0.9620  +0.0000  0.9619  +0.0002
+                sam_edge_p90_s2_key6  0.9620  +0.0000  0.9613  -0.0004
+                sam_edge_mean_s2_all  0.9620  +0.0000  0.9615  -0.0002
+                 sam_edge_p90_s1_all  0.9620  -0.0000  0.9615  -0.0002
+                sam_edge_p90_s4_key6  0.9619  -0.0000  0.9606  -0.0011
+         sam_edge_tail_ratio_s4_key6  0.9619  -0.0001  0.9606  -0.0011
+                 sam_edge_std_s1_all  0.9619  -0.0001  0.9620  +0.0004
+                sam_edge_p90_s1_key6  0.9619  -0.0001  0.9622  +0.0006
+          sam_edge_tail_ratio_s4_all  0.9617  -0.0002  0.9606  -0.0011
+                sam_edge_std_s1_key6  0.9617  -0.0002  0.9617  +0.0000
+               sam_edge_mean_s4_key6  0.9617  -0.0002  0.9611  -0.0006
+         sam_edge_tail_ratio_s1_key6  0.9617  -0.0003  0.9613  -0.0004
+          sam_edge_tail_ratio_s1_all  0.9616  -0.0003  0.9617  +0.0000
+          sam_edge_tail_ratio_s2_all  0.9616  -0.0004  0.9604  -0.0013
+         sam_edge_tail_ratio_s2_key6  0.9614  -0.0006  0.9609  -0.0007
