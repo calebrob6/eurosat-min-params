@@ -1,0 +1,19 @@
+One-step backward prune of verified 34-feature >96% candidate
+select seeds=0..2; verify A=10..19; verify B=30..39; C=3
+test policy: evaluate only after verify A, verify B, and val >= 0.960
+
+dropped_feature=pool:300
+k=33
+reference-class parameters=306
+select CV seeds 0..2=0.9620
+verify CV seeds 10..19=0.9615
+verify CV seeds 30..39=0.9613
+validation=0.9617
+independent_gate=PASS
+test=0.9604
+objective_gate=>96 PASS
+
+pool_feature_idx
+325,297,316,294,144,94,145,348,206,195,298,75,37,317,287,86,291,323,95,17,310,29,63,197,68,329,314,289,65,32,365,2
+region_shape_features
+tail_aniso_low_ndvi
