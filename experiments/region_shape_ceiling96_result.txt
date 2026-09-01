@@ -1,0 +1,17 @@
+Spectral-tail region-shape prescreen on frozen 36-feature frontier
+train-only select CV seeds=0..2; C=3; test not loaded
+baseline select_cv=0.9625 validation=0.9609
+
+                      candidate   selCV      dCV     val     dval
+             tail_aniso_low_pan  0.9630  +0.0005  0.9617  +0.0007
+          tail_spread_high_ndbi  0.9623  -0.0002  0.9615  +0.0006
+            tail_aniso_low_ndvi  0.9622  -0.0002  0.9637  +0.0028
+            tail_spread_low_pan  0.9622  -0.0002  0.9617  +0.0007
+           tail_spread_low_ndvi  0.9622  -0.0002  0.9604  -0.0006
+           tail_spread_high_pan  0.9622  -0.0003  0.9611  +0.0002
+           tail_spread_low_ndbi  0.9621  -0.0004  0.9611  +0.0002
+            tail_aniso_high_pan  0.9621  -0.0004  0.9606  -0.0004
+           tail_aniso_high_ndbi  0.9620  -0.0005  0.9620  +0.0011
+           tail_aniso_high_ndvi  0.9620  -0.0005  0.9606  -0.0004
+            tail_aniso_low_ndbi  0.9618  -0.0007  0.9598  -0.0011
+          tail_spread_high_ndvi  0.9617  -0.0008  0.9619  +0.0009
