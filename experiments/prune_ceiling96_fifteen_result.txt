@@ -1,0 +1,17 @@
+Fifteenth one-step backward prune of verified 50-feature >96% candidate
+select seeds=0..2; verify A=10..19; verify B=30..39; C=3
+test policy: evaluate only after verify A, verify B, and val >= 0.960
+
+dropped_feature=38
+k=49
+reference-class parameters=450
+select CV seeds 0..2=0.9634
+verify CV seeds 10..19=0.9630
+verify CV seeds 30..39=0.9630
+validation=0.9631
+independent_gate=PASS
+test=0.9637
+objective_gate=>96 PASS
+
+feature_idx
+351,92,325,297,316,294,144,94,145,348,292,111,206,195,298,75,37,317,287,86,291,26,321,205,323,95,36,17,310,91,29,10,93,63,197,68,33,329,300,319,60,358,314,289,65,32,361,273,365
