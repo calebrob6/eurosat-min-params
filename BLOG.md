@@ -121,6 +121,8 @@ The deployed model is therefore one affine map on the raw fixed features. It doe
 
 The full candidate pool grew to hundreds of measurements, but only the selected measurements entered the classifier and cost learned parameters. Each new family was intended to capture a physical or geometric property missing from the existing pool.
 
+The standalone [`FEATURES.html`](FEATURES.html) atlas animates every core and experimental feature concept described below.
+
 ### Spectral summaries
 
 We began with per-band means, standard deviations, and intensity percentiles. Means describe overall reflectance, standard deviations provide a rough measure of texture, and percentiles preserve more of the shape of each band's distribution than minimum and maximum alone.

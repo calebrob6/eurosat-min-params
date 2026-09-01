@@ -1,5 +1,7 @@
 # EuroSAT minimum-parameter results
 
+See [`FEATURES.html`](FEATURES.html) for an animated visual explanation of every core and experimental feature family.
+
 ## Executive summary
 
 A logistic regression using only per-band image statistics does not reach the project's accuracy target. Using 13 bands × {mean, standard deviation, minimum, maximum} gives 52 fixed features; tuning `C` on the validation split selects `C=300` and produces **90.93% validation / 90.96% test accuracy**. The head stores 530 values in scikit-learn's 10-row form, or **477 parameters** in the equivalent reference-class form used by the latest submissions.

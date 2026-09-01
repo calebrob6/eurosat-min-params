@@ -1,0 +1,1666 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An interactive visual atlas of the fixed EuroSAT features used by the minimum-parameter classifiers.">
+  <title>EuroSAT feature atlas</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17251d;
+      --muted: #5c6b62;
+      --paper: #f2f5ef;
+      --card: #ffffff;
+      --line: #d7dfd8;
+      --green: #176b4d;
+      --green-dark: #0b4934;
+      --green-soft: #e2f1e9;
+      --blue: #246b9a;
+      --blue-soft: #e6f1f8;
+      --orange: #b65e29;
+      --orange-soft: #f8e9df;
+      --violet: #6b58a6;
+      --violet-soft: #eeeaf8;
+      --yellow: #d39b1f;
+      --shadow: 0 20px 55px rgba(28, 55, 40, 0.1);
+      --radius: 20px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 17px;
+      line-height: 1.65;
+    }
+
+    a {
+      color: var(--green-dark);
+      text-underline-offset: 0.18em;
+    }
+
+    code {
+      border-radius: 5px;
+      background: #edf1ec;
+      padding: 0.08em 0.3em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.91em;
+    }
+
+    .wrap {
+      width: min(1180px, calc(100% - 2rem));
+      margin-inline: auto;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 86% 10%, rgba(230, 241, 248, 0.95), transparent 30%),
+        radial-gradient(circle at 12% 90%, rgba(226, 241, 233, 0.95), transparent 34%),
+        #fbfcfa;
+      padding: 4.8rem 0 3.8rem;
+    }
+
+    .hero::before,
+    .hero::after {
+      position: absolute;
+      border: 1px solid rgba(23, 107, 77, 0.12);
+      border-radius: 50%;
+      content: "";
+    }
+
+    .hero::before {
+      top: -7rem;
+      right: -3rem;
+      width: 22rem;
+      height: 22rem;
+      box-shadow: 0 0 0 4rem rgba(23, 107, 77, 0.025);
+    }
+
+    .hero::after {
+      bottom: -9rem;
+      left: -6rem;
+      width: 19rem;
+      height: 19rem;
+      box-shadow: 0 0 0 3rem rgba(36, 107, 154, 0.025);
+    }
+
+    .eyebrow {
+      margin: 0 0 0.65rem;
+      color: var(--green);
+      font-size: 0.78rem;
+      font-weight: 850;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin-top: 0;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+    }
+
+    h1 {
+      max-width: 930px;
+      margin-bottom: 1rem;
+      font-size: clamp(2.55rem, 7vw, 5.4rem);
+      font-weight: 880;
+    }
+
+    h2 {
+      margin-bottom: 1rem;
+      font-size: clamp(1.8rem, 4vw, 2.9rem);
+    }
+
+    h3 {
+      margin-bottom: 0.55rem;
+      font-size: 1.28rem;
+    }
+
+    .hero-copy {
+      max-width: 850px;
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(1.05rem, 2vw, 1.28rem);
+    }
+
+    .hero-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 1.5rem;
+    }
+
+    .button-link,
+    button,
+    select {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--ink);
+      font: inherit;
+      font-size: 0.88rem;
+      font-weight: 750;
+    }
+
+    .button-link {
+      padding: 0.55rem 0.85rem;
+      text-decoration: none;
+    }
+
+    .button-link.primary {
+      border-color: var(--green);
+      background: var(--green);
+      color: white;
+    }
+
+    .toolbar-shell {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      border-bottom: 1px solid var(--line);
+      background: rgba(242, 245, 239, 0.94);
+      backdrop-filter: blur(14px);
+    }
+
+    .toolbar {
+      display: flex;
+      overflow-x: auto;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.65rem 0;
+    }
+
+    .toolbar button,
+    .toolbar select {
+      flex: 0 0 auto;
+      cursor: pointer;
+      padding: 0.45rem 0.75rem;
+    }
+
+    .toolbar button:hover,
+    .toolbar select:hover {
+      border-color: var(--green);
+    }
+
+    .toolbar button:focus-visible,
+    .toolbar select:focus-visible,
+    .button-link:focus-visible {
+      border-color: var(--green);
+      outline: 3px solid rgba(23, 107, 77, 0.28);
+      outline-offset: 2px;
+    }
+
+    .toolbar-label {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 750;
+    }
+
+    .toolbar-spacer {
+      flex: 1 0 1rem;
+    }
+
+    .progress {
+      flex: 0 0 150px;
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #dfe5df;
+    }
+
+    .progress > span {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--green), var(--blue), var(--violet));
+      transform: scaleX(0);
+      transform-origin: left;
+    }
+
+    main {
+      padding-bottom: 5rem;
+    }
+
+    section {
+      scroll-margin-top: 5.5rem;
+      padding: 4rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-lead {
+      max-width: 830px;
+      margin: -0.25rem 0 2rem;
+      color: var(--muted);
+      font-size: 1.06rem;
+    }
+
+    .plain-note {
+      display: grid;
+      grid-template-columns: 0.7fr 2.3fr;
+      gap: 1.2rem;
+      align-items: start;
+      border: 1px solid #c5ddce;
+      border-radius: var(--radius);
+      background: var(--green-soft);
+      padding: 1.4rem;
+    }
+
+    .plain-note strong {
+      color: var(--green-dark);
+      font-size: 1.1rem;
+    }
+
+    .plain-note p {
+      margin: 0;
+    }
+
+    .model-cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .model-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      padding: 1.2rem;
+    }
+
+    .model-card b {
+      display: block;
+      margin-bottom: 0.2rem;
+      font-size: 1.55rem;
+      letter-spacing: -0.04em;
+    }
+
+    .model-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.91rem;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--card);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 0.76rem 0.82rem;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf1ec;
+      color: #314238;
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .num {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .feature {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+      gap: 2rem;
+      align-items: center;
+      min-height: 480px;
+    }
+
+    .feature:nth-child(even) .feature-copy {
+      order: 2;
+    }
+
+    .feature:nth-child(even) .viz-card {
+      order: 1;
+    }
+
+    .feature-copy p {
+      color: var(--muted);
+    }
+
+    .feature-copy p:last-child {
+      margin-bottom: 0;
+    }
+
+    .kicker-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .number-pill {
+      display: inline-grid;
+      width: 2.2rem;
+      height: 2.2rem;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--ink);
+      color: white;
+      font-size: 0.82rem;
+      font-weight: 850;
+    }
+
+    .tier,
+    .usage {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 0.25rem 0.58rem;
+      font-size: 0.75rem;
+      font-weight: 800;
+    }
+
+    .tier.core {
+      background: var(--green-soft);
+      color: var(--green-dark);
+    }
+
+    .tier.experimental {
+      background: var(--violet-soft);
+      color: #4e3f80;
+    }
+
+    .usage {
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--muted);
+    }
+
+    .usage strong {
+      color: var(--ink);
+    }
+
+    .formula {
+      overflow-x: auto;
+      border-left: 4px solid var(--blue);
+      border-radius: 0 10px 10px 0;
+      background: var(--blue-soft);
+      padding: 0.75rem 0.95rem;
+      color: #1c4f70;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.88rem;
+      white-space: nowrap;
+    }
+
+    .takeaway {
+      border-radius: 12px;
+      background: #f8faf7;
+      padding: 0.85rem 1rem;
+      color: #33473b;
+      font-size: 0.92rem;
+    }
+
+    .takeaway strong {
+      color: var(--green-dark);
+    }
+
+    .viz-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(rgba(23, 107, 77, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 107, 77, 0.025) 1px, transparent 1px),
+        #fbfcfa;
+      background-size: 20px 20px;
+      padding: 0.8rem;
+      box-shadow: var(--shadow);
+    }
+
+    .viz-card::after {
+      position: absolute;
+      right: -3rem;
+      bottom: -3rem;
+      width: 9rem;
+      height: 9rem;
+      border-radius: 50%;
+      background: var(--green);
+      content: "";
+      opacity: 0.035;
+      pointer-events: none;
+    }
+
+    .viz-card svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 31 / 15;
+    }
+
+    .viz-card figcaption {
+      border-top: 1px solid var(--line);
+      margin-top: 0.4rem;
+      padding: 0.75rem 0.35rem 0.2rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .legend span {
+      display: inline-flex;
+      gap: 0.35rem;
+      align-items: center;
+    }
+
+    .swatch {
+      width: 0.75rem;
+      height: 0.75rem;
+      border-radius: 3px;
+      background: var(--green);
+    }
+
+    .swatch.blue {
+      background: var(--blue);
+    }
+
+    .swatch.orange {
+      background: var(--orange);
+    }
+
+    .swatch.violet {
+      background: var(--violet);
+    }
+
+    .svg-label {
+      fill: #526159;
+      font-family: system-ui, sans-serif;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .svg-title {
+      fill: #1d3025;
+      font-family: system-ui, sans-serif;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .svg-value {
+      fill: var(--green-dark);
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .dash {
+      stroke-dasharray: 8 7;
+      animation: march 1.2s linear infinite;
+    }
+
+    .pulse {
+      animation: pulse 1.7s ease-in-out infinite;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    @keyframes march {
+      to {
+        stroke-dashoffset: -30;
+      }
+    }
+
+    @keyframes pulse {
+      50% {
+        opacity: 0.45;
+        transform: scale(1.12);
+      }
+    }
+
+    body.paused .dash,
+    body.paused .pulse {
+      animation-play-state: paused;
+    }
+
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+      margin-top: 1rem;
+    }
+
+    footer {
+      border-top: 1px solid var(--line);
+      background: #e8ede7;
+      padding: 2rem 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    footer p {
+      margin: 0;
+    }
+
+    noscript {
+      display: block;
+      border: 1px solid #e4c987;
+      background: #fff5d5;
+      padding: 1rem;
+    }
+
+    @media (max-width: 900px) {
+      .feature {
+        grid-template-columns: 1fr;
+        min-height: 0;
+      }
+
+      .feature:nth-child(even) .feature-copy,
+      .feature:nth-child(even) .viz-card {
+        order: initial;
+      }
+
+      .model-cards {
+        grid-template-columns: 1fr;
+      }
+
+      .plain-note {
+        grid-template-columns: 1fr;
+        gap: 0.45rem;
+      }
+    }
+
+    @media (max-width: 560px) {
+      body {
+        font-size: 16px;
+      }
+
+      .hero {
+        padding: 3.2rem 0 2.7rem;
+      }
+
+      section {
+        padding: 3rem 0;
+      }
+
+      .toolbar-spacer,
+      .progress {
+        display: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      .dash,
+      .pulse {
+        animation: none;
+      }
+    }
+
+    @media print {
+      .toolbar-shell {
+        display: none;
+      }
+
+      body {
+        background: white;
+        font-size: 11pt;
+      }
+
+      .hero {
+        padding: 1.5rem 0;
+      }
+
+      section {
+        break-inside: avoid;
+        padding: 1.5rem 0;
+      }
+
+      .feature {
+        min-height: 0;
+      }
+
+      .viz-card {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Interactive method guide</p>
+      <h1>How we turn a 13-band image into a handful of useful numbers</h1>
+      <p class="hero-copy">The final EuroSAT classifiers are linear, but the measurements they receive are deliberately rich. This atlas shows every distinct feature idea in the core 320-feature pool and the experimental additions behind the 252-parameter result.</p>
+      <div class="hero-links">
+        <a class="button-link primary" href="BLOG.md">Read the full blog post</a>
+        <a class="button-link" href="RESULTS.html">Open the results report</a>
+        <a class="button-link" href="#atlas">Jump to the animations</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="toolbar-shell">
+    <div class="toolbar wrap" aria-label="Animation controls">
+      <button id="play-toggle" type="button" aria-pressed="false">Pause animations</button>
+      <button id="restart" type="button">Restart all figures</button>
+      <label class="toolbar-label" for="speed">Speed</label>
+      <select id="speed" aria-label="Animation speed">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="1.5">1.5x</option>
+      </select>
+      <span class="toolbar-spacer"></span>
+      <span class="toolbar-label">Page progress</span>
+      <span class="progress" aria-hidden="true"><span id="page-progress"></span></span>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <noscript>The explanations remain readable without JavaScript, but the figures need JavaScript to animate.</noscript>
+
+    <section id="overview">
+      <p class="eyebrow">The big idea</p>
+      <h2>Spend computation on fixed measurements, then keep the learned model tiny</h2>
+      <p class="section-lead">A 64 by 64 patch contains 53,248 raw values. We compress it into interpretable summaries of brightness, texture, direction, material boundaries, lines, corners, local patterns, and region size. Feature selection keeps only the few summaries that add complementary information.</p>
+
+      <div class="plain-note">
+        <strong>What counts as a parameter?</strong>
+        <p>The formulas on this page are fixed programs and contain no learned values. The project counts only the weights and biases learned by logistic regression. This makes the result a study of learned state, not necessarily runtime or source-code size.</p>
+      </div>
+
+      <div class="model-cards">
+        <article class="model-card">
+          <b>171 parameters</b>
+          <p>The 94% model selects 18 features: five spectral percentiles, three gradients, one orientation entropy, two band correlations, five index-texture features, one line feature, and one corner feature.</p>
+        </article>
+        <article class="model-card">
+          <b>279 parameters</b>
+          <p>The 95% model selects 30 features: ten spectral summaries, five gradients, two orientation entropies, two band correlations, eight index-texture features, and three corner features.</p>
+        </article>
+        <article class="model-card">
+          <b>252 parameters</b>
+          <p>The experimental 95% model selects 27 features: 22 from the 305-feature <code>o6</code> sub-pool, two corners and one line from the rest of the core pool, plus one experimental local-binary-pattern feature and one blob feature.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="inventory">
+      <p class="eyebrow">Feature inventory</p>
+      <h2>What is in the candidate pool?</h2>
+      <p class="section-lead">The source-backed submissions use a 320-feature core pool. The richer experimental pool adds new global and multiscale variants. The animations below group repeated variants under the same underlying idea.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Concept</th><th class="num">Features</th><th>Where it appears</th><th>What it measures</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Spectral distribution</td><td class="num">91</td><td>Core</td><td>Mean, standard deviation, and five percentiles for every band</td></tr>
+            <tr><td>Multiscale gradients</td><td class="num">78</td><td>Core</td><td>Average and variation of edge strength at three scales</td></tr>
+            <tr><td>Structure coherence</td><td class="num">26</td><td>Core</td><td>Whether gradients share one dominant direction at two scales</td></tr>
+            <tr><td>Orientation distribution</td><td class="num">65</td><td>Core</td><td>Four-bin histograms plus eight-bin entropy summaries</td></tr>
+            <tr><td>Fourier peak</td><td class="num">13</td><td>Core</td><td>Strength of repeating mid-frequency patterns</td></tr>
+            <tr><td>Cross-band correlation</td><td class="num">8</td><td>Core</td><td>Whether spatial patterns in selected band pairs move together</td></tr>
+            <tr><td>Index-map texture</td><td class="num">24</td><td>Core</td><td>Variation, edge strength, edge variation, and spread in six index maps</td></tr>
+            <tr><td>Hough lines</td><td class="num">9</td><td>Core</td><td>Global straight-line strength on panchromatic, NDVI, and NDBI maps</td></tr>
+            <tr><td>Harris corners</td><td class="num">6</td><td>Core</td><td>Junction density and strength on the same three channels</td></tr>
+            <tr><td>Local binary patterns</td><td class="num">6</td><td>Experimental</td><td>Rotation-invariant micro-texture pattern entropy and uniformity</td></tr>
+            <tr><td>Connected-component blobs</td><td class="num">9</td><td>Experimental</td><td>Largest region, region count, and mean region size</td></tr>
+            <tr><td>Radial Fourier slope</td><td class="num">3</td><td>Experimental</td><td>How quickly spatial power falls from coarse to fine scales</td></tr>
+            <tr><td>Index direction and extra scales</td><td class="num">18</td><td>Experimental</td><td>Coherence and coarse texture on spectral-index maps</td></tr>
+            <tr><td>Extra cached variants</td><td class="num">21</td><td>Experimental</td><td>13 coarse orientation-entropy features plus 8 re-cached core correlations with no new formula</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="atlas">
+      <p class="eyebrow">Animated atlas</p>
+      <h2>Follow the information as it is compressed</h2>
+      <p class="section-lead">Each illustration uses a synthetic patch so the relevant signal is easy to see. The real code applies the same calculation independently across thousands of EuroSAT patches and selected Sentinel-2 bands.</p>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">01</span><span class="tier core">Core</span><span class="usage"><strong>171:</strong> 5</span><span class="usage"><strong>279:</strong> 10</span></div>
+          <h2>Spectral distributions</h2>
+          <p>Every Sentinel-2 band responds to a different part of the electromagnetic spectrum. Water, healthy vegetation, dry soil, and concrete therefore produce different 13-band profiles even when their RGB colors look similar.</p>
+          <p>For each band, the core pool stores the mean, standard deviation, and the 10th, 25th, 50th, 75th, and 90th percentiles. The simple baseline also uses minimum and maximum. Percentiles are less sensitive to one unusual pixel and preserve more of the distribution's shape.</p>
+          <div class="formula">13 bands x (mean + stdev + 5 percentiles) = 91 features</div>
+          <p class="takeaway"><strong>What the animation shows:</strong> the line is the band mean, the narrow boxes are the middle percentiles, and the whiskers show a wider range. The whole profile changes as the synthetic surface moves between vegetation-like and built-like reflectance.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-spectral" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated spectral profile with percentile boxes and ranges"></svg>
+          <figcaption>Spectral summaries answer "what values are present?" but not "where are they?"</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">02</span><span class="tier core">Core</span><span class="usage"><strong>171:</strong> 3</span><span class="usage"><strong>279:</strong> 5</span></div>
+          <h2>Multiscale gradient texture</h2>
+          <p>A gradient measures how quickly pixel values change from one location to the next. Large gradients mark edges: field boundaries, roads, rooftops, shorelines, and changes in vegetation.</p>
+          <p>We calculate gradient magnitude, summarize its mean and standard deviation, average-pool the image by two, and repeat for three scales. Fine scales see small texture; coarse scales see larger structures.</p>
+          <div class="formula">sqrt(gx^2 + gy^2), then mean and stdev at 64, 32, and 16 pixels</div>
+          <p class="takeaway"><strong>Why it mattered:</strong> adding one gradient scale moved mean-plus-stdev from 87.8% to about 92.6%. Three scales were enough to push a linear classifier past 95%.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-gradient" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated image edge map and multiscale pooled summaries"></svg>
+          <figcaption>The bright diagonal structure becomes an edge map, then a small set of scale summaries.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">03</span><span class="tier core">Core building block</span></div>
+          <h2>Normalized-difference index maps</h2>
+          <p>Band ratios turn spectral physics into interpretable maps. NDVI contrasts near-infrared and red light to emphasize vegetation. NDWI emphasizes water, NDBI built surfaces, NDMI moisture, NBR burn-related contrast, and BSI bare soil.</p>
+          <p>The ratio removes much of the overall brightness and keeps relative spectral contrast. In the deployed feature pool, the full per-pixel maps feed later texture, line, and corner calculations rather than being reduced immediately to one patch mean.</p>
+          <div class="formula">NDVI(x, y) = (NIR(x, y) - RED(x, y)) / (NIR(x, y) + RED(x, y) + epsilon)</div>
+          <p class="takeaway"><strong>What the animation shows:</strong> a road has only a modest effect on the mean band values, but it becomes a sharp low-NDVI stripe inside a vegetated patch.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-index" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated red and near-infrared maps combined into NDVI"></svg>
+          <figcaption>Ratios transform raw bands into maps with direct physical meaning.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">04</span><span class="tier core">Core</span><span class="usage"><strong>Pool:</strong> 26</span></div>
+          <h2>Structure-tensor coherence</h2>
+          <p>Gradient magnitude cannot tell a road from random rough texture if both have equally strong edges. Coherence asks whether the local gradients agree on a direction.</p>
+          <p>We average the gradient outer products into a two-by-two structure tensor. If one eigen-direction dominates, the tensor is elongated and coherence is near one. If energy is similar in every direction, the tensor is round and coherence is near zero.</p>
+          <div class="formula">coherence = sqrt((Sxx - Syy)^2 + 4 Sxy^2) / (Sxx + Syy + epsilon)</div>
+          <p class="takeaway"><strong>Interpretation:</strong> aligned crop rows and roads are coherent; irregular forest texture is not. We calculate one value per band at two scales.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-coherence" class="viz" viewBox="0 0 620 300" role="img" aria-label="Gradient directions morphing between aligned and isotropic with a coherence ellipse"></svg>
+          <figcaption>The arrows align, the tensor ellipse stretches, and the coherence score rises.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">05</span><span class="tier core">Core</span><span class="usage"><strong>171:</strong> 1 entropy</span><span class="usage"><strong>279:</strong> 2 entropies</span></div>
+          <h2>Orientation histograms and entropy</h2>
+          <p>Coherence compresses direction into one second-moment score. Orientation histograms retain the full distribution: which directions are present and how much edge strength points each way.</p>
+          <p>We use unsigned angles, so a line pointing left and the same line pointing right share a bin. Histogram counts are weighted by gradient magnitude. Shannon entropy then measures how concentrated or spread out the distribution is.</p>
+          <div class="formula">entropy = -sum(p[angle] x log(p[angle] + epsilon))</div>
+          <p class="takeaway"><strong>Difference from coherence:</strong> one strong edge can dominate coherence, while entropy still sees whether the remaining edge field contains one direction, two directions, or many.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-orientation" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated edge directions, orientation histogram, and entropy"></svg>
+          <figcaption>The histogram spreads from one dominant direction toward a uniform distribution, increasing entropy.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">06</span><span class="tier core">Fourier peak</span><span class="tier experimental">Radial slope</span></div>
+          <h2>Frequency-domain texture</h2>
+          <p>Repeating crop rows may be difficult to summarize directly in image space, but they create distinct peaks in the two-dimensional Fourier power spectrum.</p>
+          <p>The core feature measures the strongest mid-frequency power divided by the average power in an annulus, then applies <code>log1p</code>. The experimental radial-slope feature averages power by radius and fits the slope of log power against log radius.</p>
+          <div class="formula">peakiness = log(1 + max(mid-frequency power) / mean(mid-frequency power))</div>
+          <p class="takeaway"><strong>Two related questions:</strong> peakiness asks whether one repeating scale is unusually strong; radial slope asks whether the scene is generally dominated by coarse or fine structure.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-frequency" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated repeating rows, Fourier peaks, and radial power curve"></svg>
+          <figcaption>Regular rows in image space become a pair of bright off-center peaks in frequency space.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">07</span><span class="tier core">Core</span><span class="usage"><strong>171:</strong> 2</span><span class="usage"><strong>279:</strong> 2</span></div>
+          <h2>Cross-band spatial correlation</h2>
+          <p>Two patches can have the same mean red and NIR values but differ in whether red and NIR patterns occur in the same places. Pearson correlation measures that shared spatial arrangement.</p>
+          <p>We use eight physically useful pairs such as red/NIR, green/NIR, blue/NIR, SWIR1/NIR, red/SWIR1, green/red, NIR/SWIR2, and SWIR1/SWIR2.</p>
+          <div class="formula">corr(a, b) = mean((a - mean(a)) x (b - mean(b))) / (stdev(a) x stdev(b))</div>
+          <p class="takeaway"><strong>What it adds:</strong> every earlier feature looked at one band at a time. Correlation is the first feature that explicitly describes how two spectral channels co-vary over space.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-correlation" class="viz" viewBox="0 0 620 300" role="img" aria-label="Two animated band maps and a scatter plot changing from correlated to uncorrelated"></svg>
+          <figcaption>The second band moves from matching the first to disagreeing with it; the scatter cloud opens and correlation falls.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">08</span><span class="tier core">Core</span><span class="tier experimental">Extra scales and coherence</span><span class="usage"><strong>171:</strong> 5</span><span class="usage"><strong>279:</strong> 8</span></div>
+          <h2>Texture inside index maps</h2>
+          <p>A patch-level NDVI value cannot distinguish a uniform crop from a road cutting through vegetation if their averages happen to match. We therefore calculate texture directly on every NDVI, NDWI, NDBI, NDMI, NBR, and BSI map.</p>
+          <p>For each map, the core family stores spatial standard deviation, mean gradient magnitude, gradient-magnitude standard deviation, and the difference between the 90th and 10th percentiles. Experimental variants repeat texture at a coarser scale and calculate coherence on index-map gradients.</p>
+          <div class="formula">6 indices x (map stdev + gradient mean + gradient stdev + p90-p10) = 24 features</div>
+          <p class="takeaway"><strong>Why it was strong:</strong> material-index boundaries cancel some illumination variation and expose the shapes that separate roads, crops, water, and built surfaces.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-index-texture" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated NDVI map, its gradient map, and texture summary meters"></svg>
+          <figcaption>A low-NDVI road crosses a high-NDVI field; the mean changes little while gradient summaries respond strongly.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">09</span><span class="tier core">Core</span><span class="usage"><strong>171:</strong> 1</span><span class="usage"><strong>252 experiment:</strong> 1</span></div>
+          <h2>Global Hough-line structure</h2>
+          <p>Local orientation features cannot tell many short parallel edges from one long straight feature. The Hough transform lets every edge pixel vote for the lines that could pass through it. Collinear pixels accumulate in the same angle-and-offset bin.</p>
+          <p>We threshold at the 85th percentile of gradient magnitude, evaluate 60 unsigned orientations, quantize line offset in two-pixel bins, and keep three summaries: peak fraction, peak length relative to the patch diagonal, and the combined strength of the best line at the top three orientations.</p>
+          <div class="formula">3 channels (pan, NDVI, NDBI) x 3 line summaries = 9 features</div>
+          <p class="takeaway"><strong>The selected 94% feature:</strong> the combined strength of the top three NDVI lines. It captures global collinearity that no local gradient statistic sees.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-hough" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated Hough line scanning an edge map and creating a peak in an accumulator"></svg>
+          <figcaption>When the scanning line aligns with the road, many edge pixels vote together and the accumulator peak flashes.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">10</span><span class="tier core">Core</span><span class="usage"><strong>171:</strong> 1</span><span class="usage"><strong>279:</strong> 3</span><span class="usage"><strong>252 experiment:</strong> 2</span></div>
+          <h2>Harris corners and junctions</h2>
+          <p>A line changes strongly in one direction. A corner changes strongly in two directions. Harris response uses a locally smoothed structure tensor to identify locations where both directions contain energy.</p>
+          <p>We calculate the fraction of active-gradient pixels with positive Harris response and a scale-normalized corner-strength measure. The three source channels are the panchromatic mean, NDVI, and NDBI.</p>
+          <div class="formula">R = det(J) - 0.05 x trace(J)^2</div>
+          <p class="takeaway"><strong>Why it helped:</strong> intersections and block grids occur in residential and industrial scenes, while crop rows can be strongly directional without forming junctions.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-corner" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated street grid with Harris corner responses and a moving analysis window"></svg>
+          <figcaption>The analysis window passes over edges and intersections; only intersections produce a strong two-direction response.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">11</span><span class="tier experimental">Experimental</span><span class="usage"><strong>252 experiment:</strong> 1</span></div>
+          <h2>Rotation-invariant local binary patterns</h2>
+          <p>Local binary patterns describe micro-texture without caring about absolute brightness. Each of eight neighbors becomes one bit: one if it is brighter than the center, zero otherwise.</p>
+          <p>We count circular bit transitions. Patterns with at most two transitions are "uniform" and are grouped by the number of one bits; all more complicated patterns share a tenth bin. The final features are histogram entropy and the fraction of uniform patterns.</p>
+          <div class="formula">8 neighbor comparisons -> 10 rotation-invariant bins -> entropy + uniform fraction</div>
+          <p class="takeaway"><strong>Why it is complementary:</strong> LBP recognizes fine repeated motifs and roughness patterns that can have similar gradient magnitude but different local arrangements.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-lbp" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated 3 by 3 local binary pattern comparison and histogram"></svg>
+          <figcaption>Neighbors flip above and below the center value, changing the circular binary pattern and its uniformity.</figcaption>
+        </figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-copy">
+          <div class="kicker-row"><span class="number-pill">12</span><span class="tier experimental">Experimental</span><span class="usage"><strong>252 experiment:</strong> 1</span></div>
+          <h2>Connected-component blob structure</h2>
+          <p>After thresholding a channel above its patch median, eight-connected component labeling divides the bright half of the image into contiguous regions.</p>
+          <p>We record the largest component as a fraction of the patch, the logarithm of the component count, and mean component size. A few large fields and many small urban regions can have the same bright-pixel fraction but very different region granularity.</p>
+          <div class="formula">largest area / patch area, log(1 + component count), mean area / patch area</div>
+          <p class="takeaway"><strong>Why it entered the 252-parameter model:</strong> one NDVI blob-size feature supplied region-level information not already captured by gradients, lines, or corners.</p>
+        </div>
+        <figure class="viz-card">
+          <svg id="viz-blob" class="viz" viewBox="0 0 620 300" role="img" aria-label="Animated connected regions splitting into large and small components"></svg>
+          <figcaption>The same foreground area fragments from a few large regions into many small components, changing the blob summaries.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="compression">
+      <p class="eyebrow">Final compression</p>
+      <h2>Hundreds of candidates become 18 or 30 learned inputs</h2>
+      <p class="section-lead">Adding a feature family to the candidate pool costs no learned parameters. The cost appears only if a feature survives selection and receives classifier weights. Backward elimination repeatedly removes the feature whose absence hurts cross-validation least.</p>
+
+      <div class="plain-note">
+        <strong>Why a broad pool can produce a tiny model</strong>
+        <p>The pool is a menu, not the deployed vector. Different families compete to explain the same images. Redundant measurements disappear, while a small number of genuinely complementary measurements survive across spectral value, local texture, direction, material boundaries, and global layout.</p>
+      </div>
+
+      <div class="legend">
+        <span><i class="swatch"></i> spectral or physical-index signal</span>
+        <span><i class="swatch blue"></i> local spatial structure</span>
+        <span><i class="swatch orange"></i> global layout</span>
+        <span><i class="swatch violet"></i> experimental additions</span>
+      </div>
+
+      <div class="footer-links">
+        <a class="button-link primary" href="BLOG.md">Continue to the methodology and results</a>
+        <a class="button-link" href="RESULTS.html">Explore the result tables</a>
+        <a class="button-link" href="src/features.py">Read the core implementation</a>
+        <a class="button-link" href="experiments/gstruct2_features_lib.py">Read the experimental implementation</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>Standalone feature atlas for the EuroSAT minimum-parameter experiments. All SVG, CSS, and JavaScript are embedded in this file.</p>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const NS = "http://www.w3.org/2000/svg";
+      const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+      const lerp = (a, b, t) => a + (b - a) * t;
+      const wave = (t, phase = 0) => 0.5 + 0.5 * Math.sin(t + phase);
+      const colors = {
+        ink: "#17251d",
+        muted: "#5c6b62",
+        line: "#d7dfd8",
+        green: "#176b4d",
+        greenDark: "#0b4934",
+        greenSoft: "#dcefe5",
+        blue: "#246b9a",
+        blueSoft: "#dcecf6",
+        orange: "#b65e29",
+        orangeSoft: "#f5dfd2",
+        violet: "#6b58a6",
+        violetSoft: "#eeeaf8",
+        yellow: "#d39b1f",
+        white: "#ffffff"
+      };
+
+      function node(tag, attrs = {}, parent, textContent) {
+        const n = document.createElementNS(NS, tag);
+        for (const [key, value] of Object.entries(attrs)) {
+          n.setAttribute(key, value);
+        }
+        if (textContent !== undefined) {
+          n.textContent = textContent;
+        }
+        if (parent) {
+          parent.appendChild(n);
+        }
+        return n;
+      }
+
+      function label(parent, x, y, text, cls = "svg-label", anchor = "start") {
+        return node("text", { x, y, class: cls, "text-anchor": anchor }, parent, text);
+      }
+
+      function panel(parent, x, y, width, height, title) {
+        node("rect", { x, y, width, height, rx: 12, fill: "#ffffff", stroke: colors.line }, parent);
+        label(parent, x + 12, y + 22, title, "svg-title");
+      }
+
+      function rgb(r, g, b) {
+        return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+      }
+
+      function heat(v) {
+        v = clamp(v);
+        return rgb(lerp(238, 23, v), lerp(242, 107, v), lerp(235, 77, v));
+      }
+
+      function indexColor(v) {
+        const x = clamp((v + 1) / 2);
+        if (x < 0.5) {
+          const q = x * 2;
+          return rgb(lerp(80, 238, q), lerp(105, 224, q), lerp(145, 188, q));
+        }
+        const q = (x - 0.5) * 2;
+        return rgb(lerp(238, 31, q), lerp(224, 132, q), lerp(188, 73, q));
+      }
+
+      function makeGrid(parent, x, y, rows, cols, size, gap = 1) {
+        const cells = [];
+        for (let r = 0; r < rows; r += 1) {
+          for (let c = 0; c < cols; c += 1) {
+            cells.push(node("rect", {
+              x: x + c * (size + gap),
+              y: y + r * (size + gap),
+              width: size,
+              height: size,
+              rx: 1.5,
+              fill: "#e9eeea"
+            }, parent));
+          }
+        }
+        return cells;
+      }
+
+      function setPath(path, points) {
+        path.setAttribute("d", points.map((p, i) => `${i ? "L" : "M"} ${p[0].toFixed(2)} ${p[1].toFixed(2)}`).join(" "));
+      }
+
+      function initSpectral(svg) {
+        panel(svg, 12, 14, 596, 270, "13-band distribution summary");
+        const left = 54;
+        const top = 52;
+        const width = 530;
+        const height = 190;
+        node("line", { x1: left, y1: top + height, x2: left + width, y2: top + height, stroke: colors.muted }, svg);
+        node("line", { x1: left, y1: top, x2: left, y2: top + height, stroke: colors.muted }, svg);
+        const means = [];
+        const whiskers = [];
+        const boxes = [];
+        const points = [];
+        const names = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12"];
+        const dx = width / 12;
+        for (let i = 0; i < 13; i += 1) {
+          const x = left + dx * i;
+          whiskers.push(node("line", { x1: x, x2: x, y1: top + 40, y2: top + 150, stroke: colors.orange, "stroke-width": 2 }, svg));
+          boxes.push(node("rect", { x: x - 6, y: top + 70, width: 12, height: 50, rx: 3, fill: colors.blueSoft, stroke: colors.blue }, svg));
+          means.push(node("circle", { cx: x, cy: top + 95, r: 4.5, fill: colors.green, stroke: colors.white, "stroke-width": 2 }, svg));
+          if (i % 2 === 0 || i === 12) {
+            label(svg, x, top + height + 18, names[i], "svg-label", "middle");
+          }
+          points.push([x, top + 95]);
+        }
+        const profile = node("path", { fill: "none", stroke: colors.green, "stroke-width": 3.5, "stroke-linejoin": "round" }, svg);
+        label(svg, 21, 151, "reflectance", "svg-label", "middle").setAttribute("transform", "rotate(-90 21 151)");
+        const surface = label(svg, 580, 43, "", "svg-value", "end");
+        return (t) => {
+          const mix = wave(t * 0.55);
+          surface.textContent = mix > 0.5 ? "vegetation-like" : "built-like";
+          for (let i = 0; i < 13; i += 1) {
+            const vegetation = 0.2 + 0.08 * i + (i >= 6 && i <= 9 ? 0.42 : 0) - (i === 3 ? 0.16 : 0);
+            const built = 0.35 + 0.025 * i + 0.08 * Math.sin(i * 0.8);
+            const value = clamp(lerp(built, vegetation, mix) + 0.025 * Math.sin(t * 1.1 + i));
+            const y = top + height - value * 165 - 10;
+            const spread = 16 + 18 * wave(t * 0.8, i * 0.7);
+            points[i][1] = y;
+            means[i].setAttribute("cy", y);
+            whiskers[i].setAttribute("y1", y - spread);
+            whiskers[i].setAttribute("y2", y + spread);
+            boxes[i].setAttribute("y", y - spread * 0.48);
+            boxes[i].setAttribute("height", spread * 0.96);
+          }
+          setPath(profile, points);
+        };
+      }
+
+      function initGradient(svg) {
+        panel(svg, 10, 16, 185, 265, "synthetic band");
+        panel(svg, 217, 16, 185, 265, "gradient magnitude");
+        panel(svg, 424, 16, 186, 265, "three scales");
+        const source = makeGrid(svg, 30, 54, 10, 10, 12, 1);
+        const grad = makeGrid(svg, 237, 54, 10, 10, 12, 1);
+        node("path", { d: "M 197 145 L 214 145", stroke: colors.muted, "stroke-width": 2, "marker-end": "url(#none)" }, svg);
+        const bars = [];
+        for (let s = 0; s < 3; s += 1) {
+          label(svg, 445, 79 + s * 66, `scale ${s + 1}`, "svg-label");
+          node("rect", { x: 445, y: 90 + s * 66, width: 135, height: 12, rx: 6, fill: "#e4e9e4" }, svg);
+          bars.push(node("rect", { x: 445, y: 90 + s * 66, width: 40, height: 12, rx: 6, fill: s === 0 ? colors.green : s === 1 ? colors.blue : colors.orange }, svg));
+          label(svg, 445, 120 + s * 66, "mean edge strength", "svg-label");
+        }
+        return (t) => {
+          const offset = 2.5 * Math.sin(t * 0.75);
+          const vals = [];
+          for (let r = 0; r < 10; r += 1) {
+            for (let c = 0; c < 10; c += 1) {
+              const road = Math.exp(-Math.pow(r - (0.58 * c + 1.5 + offset), 2) / 1.5);
+              const texture = 0.1 * Math.sin(r * 2.1 + c * 1.3 + t);
+              const v = clamp(0.22 + road * 0.7 + texture);
+              vals.push(v);
+              source[r * 10 + c].setAttribute("fill", heat(v));
+            }
+          }
+          for (let r = 0; r < 10; r += 1) {
+            for (let c = 0; c < 10; c += 1) {
+              const here = vals[r * 10 + c];
+              const right = vals[r * 10 + Math.min(9, c + 1)];
+              const down = vals[Math.min(9, r + 1) * 10 + c];
+              const g = clamp(Math.hypot(right - here, down - here) * 1.8);
+              grad[r * 10 + c].setAttribute("fill", rgb(lerp(242, 36, g), lerp(244, 107, g), lerp(241, 154, g)));
+            }
+          }
+          bars.forEach((bar, i) => {
+            const width = 45 + 72 * wave(t * 0.9, i * 1.4) * (1 - i * 0.18);
+            bar.setAttribute("width", width);
+          });
+        };
+      }
+
+      function initIndex(svg) {
+        panel(svg, 8, 16, 180, 264, "red band");
+        panel(svg, 220, 16, 180, 264, "near infrared");
+        panel(svg, 432, 16, 180, 264, "NDVI");
+        label(svg, 204, 152, "-", "svg-title", "middle");
+        label(svg, 416, 152, "=", "svg-title", "middle");
+        const red = makeGrid(svg, 29, 54, 9, 9, 13, 1);
+        const nir = makeGrid(svg, 241, 54, 9, 9, 13, 1);
+        const ndvi = makeGrid(svg, 453, 54, 9, 9, 13, 1);
+        const val = label(svg, 522, 244, "", "svg-value", "middle");
+        const chips = ["NDVI", "NDWI", "NDBI", "NDMI", "NBR", "BSI"];
+        chips.forEach((name, i) => {
+          const x = 26 + i * 98;
+          node("rect", { x, y: 258, width: 80, height: 22, rx: 11, fill: i === 0 ? colors.greenSoft : "#eef1ed" }, svg);
+          label(svg, x + 40, 273, name, "svg-label", "middle");
+        });
+        return (t) => {
+          let total = 0;
+          for (let r = 0; r < 9; r += 1) {
+            for (let c = 0; c < 9; c += 1) {
+              const road = Math.abs(r - (4 + 1.2 * Math.sin(t * 0.55) + 0.15 * c)) < 0.8 ? 1 : 0;
+              const veg = 0.75 + 0.06 * Math.sin(r + c * 0.7 + t * 0.4);
+              const rv = road ? 0.58 : 0.22 + (1 - veg) * 0.22;
+              const nv = road ? 0.42 : veg;
+              const ix = (nv - rv) / (nv + rv + 0.001);
+              total += ix;
+              red[r * 9 + c].setAttribute("fill", heat(rv));
+              nir[r * 9 + c].setAttribute("fill", heat(nv));
+              ndvi[r * 9 + c].setAttribute("fill", indexColor(ix));
+            }
+          }
+          val.textContent = `mean NDVI ${Math.round(total / 81 * 100) / 100}`;
+        };
+      }
+
+      function initCoherence(svg) {
+        panel(svg, 10, 16, 370, 264, "gradient field");
+        panel(svg, 400, 16, 210, 264, "structure tensor");
+        const arrows = [];
+        for (let r = 0; r < 5; r += 1) {
+          for (let c = 0; c < 6; c += 1) {
+            const cx = 47 + c * 57;
+            const cy = 63 + r * 43;
+            arrows.push(node("line", { x1: cx - 12, y1: cy, x2: cx + 12, y2: cy, stroke: colors.blue, "stroke-width": 3, "stroke-linecap": "round" }, svg));
+          }
+        }
+        const ellipse = node("ellipse", { cx: 505, cy: 143, rx: 65, ry: 28, fill: colors.blueSoft, stroke: colors.blue, "stroke-width": 3 }, svg);
+        node("line", { x1: 430, y1: 143, x2: 580, y2: 143, stroke: colors.muted, "stroke-dasharray": "4 5" }, svg);
+        node("line", { x1: 505, y1: 70, x2: 505, y2: 216, stroke: colors.muted, "stroke-dasharray": "4 5" }, svg);
+        const score = label(svg, 505, 248, "", "svg-value", "middle");
+        return (t) => {
+          const aligned = wave(t * 0.55);
+          arrows.forEach((arrow, i) => {
+            const cx = 47 + (i % 6) * 57;
+            const cy = 63 + Math.floor(i / 6) * 43;
+            const randomAngle = Math.sin(i * 12.9898) * Math.PI;
+            const base = 0.65 + 0.18 * Math.sin(t * 0.7);
+            const angle = lerp(randomAngle, base, aligned);
+            const dx = Math.cos(angle) * 14;
+            const dy = Math.sin(angle) * 14;
+            arrow.setAttribute("x1", cx - dx);
+            arrow.setAttribute("y1", cy - dy);
+            arrow.setAttribute("x2", cx + dx);
+            arrow.setAttribute("y2", cy + dy);
+          });
+          const coherence = 0.08 + 0.9 * aligned;
+          ellipse.setAttribute("rx", 32 + 48 * coherence);
+          ellipse.setAttribute("ry", 52 - 35 * coherence);
+          ellipse.setAttribute("transform", `rotate(${30 * Math.sin(t * 0.3)} 505 143)`);
+          score.textContent = `coherence ${coherence.toFixed(2)}`;
+        };
+      }
+
+      function initOrientation(svg) {
+        panel(svg, 10, 16, 270, 264, "edge directions");
+        panel(svg, 300, 16, 310, 264, "magnitude-weighted histogram");
+        const arrows = [];
+        for (let i = 0; i < 22; i += 1) {
+          const cx = 40 + (i % 5) * 47;
+          const cy = 65 + Math.floor(i / 5) * 43;
+          arrows.push(node("line", { x1: cx - 10, y1: cy, x2: cx + 10, y2: cy, stroke: colors.green, "stroke-width": 3, "stroke-linecap": "round" }, svg));
+        }
+        const bars = [];
+        for (let i = 0; i < 8; i += 1) {
+          const x = 327 + i * 31;
+          bars.push(node("rect", { x, y: 228, width: 21, height: 1, rx: 3, fill: colors.violet }, svg));
+          label(svg, x + 10, 249, `${i}`, "svg-label", "middle");
+        }
+        const entropy = label(svg, 455, 272, "", "svg-value", "middle");
+        return (t) => {
+          const spread = wave(t * 0.45);
+          const weights = [];
+          let sum = 0;
+          for (let i = 0; i < 8; i += 1) {
+            const d = Math.min(Math.abs(i - 2), 8 - Math.abs(i - 2));
+            const concentrated = Math.exp(-d * d / 0.9);
+            const w = lerp(concentrated, 1, spread);
+            weights.push(w);
+            sum += w;
+          }
+          let h = 0;
+          weights.forEach((w, i) => {
+            const p = w / sum;
+            h -= p * Math.log(p);
+            const height = 155 * p * 2.6;
+            bars[i].setAttribute("y", 228 - height);
+            bars[i].setAttribute("height", height);
+          });
+          arrows.forEach((arrow, i) => {
+            const cx = 40 + (i % 5) * 47;
+            const cy = 65 + Math.floor(i / 5) * 43;
+            const random = (i * 1.91) % Math.PI;
+            const angle = lerp(Math.PI * 0.25, random, spread);
+            const dx = Math.cos(angle) * 12;
+            const dy = Math.sin(angle) * 12;
+            arrow.setAttribute("x1", cx - dx);
+            arrow.setAttribute("y1", cy - dy);
+            arrow.setAttribute("x2", cx + dx);
+            arrow.setAttribute("y2", cy + dy);
+          });
+          entropy.textContent = `entropy ${h.toFixed(2)} / ${Math.log(8).toFixed(2)}`;
+        };
+      }
+
+      function initFrequency(svg) {
+        panel(svg, 10, 16, 190, 264, "image space");
+        panel(svg, 215, 16, 190, 264, "Fourier power");
+        panel(svg, 420, 16, 190, 264, "radial profile");
+        const stripes = [];
+        for (let i = 0; i < 18; i += 1) {
+          stripes.push(node("line", { x1: 22, y1: 55 + i * 11, x2: 188, y2: 55 + i * 11, stroke: colors.green, "stroke-width": 4, opacity: 0.5 }, svg));
+        }
+        node("circle", { cx: 310, cy: 146, r: 72, fill: "#13271c" }, svg);
+        const peak1 = node("circle", { cx: 310, cy: 100, r: 9, fill: colors.yellow, class: "pulse" }, svg);
+        const peak2 = node("circle", { cx: 310, cy: 192, r: 9, fill: colors.yellow, class: "pulse" }, svg);
+        node("circle", { cx: 310, cy: 146, r: 7, fill: colors.white, opacity: 0.8 }, svg);
+        node("circle", { cx: 310, cy: 146, r: 50, fill: "none", stroke: colors.blueSoft, "stroke-dasharray": "4 4" }, svg);
+        const curve = node("path", { fill: "none", stroke: colors.violet, "stroke-width": 3 }, svg);
+        node("line", { x1: 449, y1: 235, x2: 585, y2: 235, stroke: colors.muted }, svg);
+        node("line", { x1: 449, y1: 65, x2: 449, y2: 235, stroke: colors.muted }, svg);
+        const score = label(svg, 518, 265, "", "svg-value", "middle");
+        return (t) => {
+          const freq = 0.7 + 0.3 * wave(t * 0.45);
+          stripes.forEach((stripe, i) => {
+            const y = 53 + i * (8 + 6 * freq);
+            stripe.setAttribute("y1", y);
+            stripe.setAttribute("y2", y + 25 * Math.sin(t * 0.25));
+            stripe.setAttribute("opacity", 0.25 + 0.7 * wave(t * 1.2, i));
+          });
+          const dy = 28 + 35 * freq;
+          peak1.setAttribute("cy", 146 - dy);
+          peak2.setAttribute("cy", 146 + dy);
+          const points = [];
+          for (let i = 0; i < 18; i += 1) {
+            const x = 449 + i * 8;
+            const y = 78 + 8 * i + 36 * Math.exp(-Math.pow(i - 7 - 2 * Math.sin(t * 0.4), 2) / 2);
+            points.push([x, y]);
+          }
+          setPath(curve, points);
+          score.textContent = `peak / mean ${(3.5 + 3 * freq).toFixed(1)}`;
+        };
+      }
+
+      function initCorrelation(svg) {
+        panel(svg, 10, 16, 175, 264, "band A");
+        panel(svg, 200, 16, 175, 264, "band B");
+        panel(svg, 390, 16, 220, 264, "pixel scatter");
+        const a = makeGrid(svg, 31, 55, 8, 8, 15, 1);
+        const b = makeGrid(svg, 221, 55, 8, 8, 15, 1);
+        node("line", { x1: 420, y1: 234, x2: 585, y2: 234, stroke: colors.muted }, svg);
+        node("line", { x1: 420, y1: 55, x2: 420, y2: 234, stroke: colors.muted }, svg);
+        const dots = [];
+        for (let i = 0; i < 32; i += 1) {
+          dots.push(node("circle", { cx: 450, cy: 180, r: 3.5, fill: colors.orange, opacity: 0.85 }, svg));
+        }
+        const score = label(svg, 500, 264, "", "svg-value", "middle");
+        return (t) => {
+          const agreement = wave(t * 0.42);
+          const av = [];
+          const bv = [];
+          for (let i = 0; i < 64; i += 1) {
+            const r = Math.floor(i / 8);
+            const c = i % 8;
+            const x = clamp(0.5 + 0.3 * Math.sin(r * 0.8 + c * 0.55) + 0.12 * Math.cos(c * 1.7));
+            const noise = 0.5 + 0.35 * Math.sin(i * 2.37 + t * 0.5);
+            const y = clamp(lerp(noise, x, agreement));
+            av.push(x);
+            bv.push(y);
+            a[i].setAttribute("fill", heat(x));
+            b[i].setAttribute("fill", heat(y));
+          }
+          dots.forEach((dot, i) => {
+            const j = i * 2;
+            dot.setAttribute("cx", 425 + av[j] * 150);
+            dot.setAttribute("cy", 229 - bv[j] * 165);
+          });
+          score.textContent = `correlation ${(0.08 + 0.9 * agreement).toFixed(2)}`;
+        };
+      }
+
+      function initIndexTexture(svg) {
+        panel(svg, 8, 16, 180, 264, "NDVI map");
+        panel(svg, 205, 16, 180, 264, "NDVI gradient");
+        panel(svg, 402, 16, 210, 264, "four summaries");
+        const map = makeGrid(svg, 29, 54, 9, 9, 13, 1);
+        const grad = makeGrid(svg, 226, 54, 9, 9, 13, 1);
+        const names = ["map stdev", "gradient mean", "gradient stdev", "p90 - p10"];
+        const meters = [];
+        names.forEach((name, i) => {
+          label(svg, 425, 70 + i * 48, name, "svg-label");
+          node("rect", { x: 425, y: 79 + i * 48, width: 155, height: 11, rx: 5.5, fill: "#e5eae5" }, svg);
+          meters.push(node("rect", { x: 425, y: 79 + i * 48, width: 20, height: 11, rx: 5.5, fill: i < 2 ? colors.green : colors.blue }, svg));
+        });
+        return (t) => {
+          const width = 0.7 + 1.1 * wave(t * 0.5);
+          const vals = [];
+          for (let r = 0; r < 9; r += 1) {
+            for (let c = 0; c < 9; c += 1) {
+              const distance = Math.abs(r - (2 + 0.58 * c + Math.sin(t * 0.5)));
+              const road = distance < width;
+              const mixed = 0.08 * Math.sin(r * 3.2 + c * 2.1 + t);
+              const value = road ? -0.15 : clamp(0.62 + mixed, -1, 1);
+              vals.push(value);
+              map[r * 9 + c].setAttribute("fill", indexColor(value));
+            }
+          }
+          let gsum = 0;
+          let g2 = 0;
+          for (let r = 0; r < 9; r += 1) {
+            for (let c = 0; c < 9; c += 1) {
+              const here = vals[r * 9 + c];
+              const right = vals[r * 9 + Math.min(8, c + 1)];
+              const down = vals[Math.min(8, r + 1) * 9 + c];
+              const g = clamp(Math.hypot(right - here, down - here));
+              gsum += g;
+              g2 += g * g;
+              grad[r * 9 + c].setAttribute("fill", rgb(lerp(244, 35, g), lerp(244, 107, g), lerp(240, 154, g)));
+            }
+          }
+          const gm = gsum / 81;
+          const gs = Math.sqrt(Math.max(0, g2 / 81 - gm * gm));
+          const metricVals = [0.28 + width * 0.1, gm * 2.5, gs * 3.2, 0.65 + width * 0.12];
+          meters.forEach((meter, i) => meter.setAttribute("width", 145 * clamp(metricVals[i])));
+        };
+      }
+
+      function initHough(svg) {
+        panel(svg, 8, 16, 290, 264, "thresholded edges");
+        panel(svg, 315, 16, 297, 264, "angle / offset accumulator");
+        const edgeDots = [];
+        for (let i = 0; i < 36; i += 1) {
+          const x = 35 + i * 6.4;
+          const y = 220 - 0.55 * i * 6.4 + 5 * Math.sin(i * 1.7);
+          edgeDots.push(node("circle", { cx: x, cy: y, r: 3, fill: colors.orange }, svg));
+        }
+        const scan = node("line", { x1: 28, y1: 232, x2: 278, y2: 72, stroke: colors.blue, "stroke-width": 3, class: "dash" }, svg);
+        const acc = makeGrid(svg, 347, 56, 10, 12, 15, 2);
+        const peak = node("rect", { x: 347, y: 56, width: 15, height: 15, rx: 2, fill: colors.yellow, class: "pulse" }, svg);
+        const score = label(svg, 462, 260, "", "svg-value", "middle");
+        return (t) => {
+          const angle = -0.57 + 0.5 * Math.sin(t * 0.55);
+          const cx = 153;
+          const cy = 150;
+          const dx = Math.cos(angle) * 145;
+          const dy = Math.sin(angle) * 145;
+          scan.setAttribute("x1", cx - dx);
+          scan.setAttribute("y1", cy - dy);
+          scan.setAttribute("x2", cx + dx);
+          scan.setAttribute("y2", cy + dy);
+          const match = Math.exp(-Math.pow(angle + 0.5, 2) / 0.025);
+          acc.forEach((cell, i) => {
+            const base = 0.08 + 0.12 * wave(t * 0.4, i);
+            cell.setAttribute("fill", heat(base));
+          });
+          const col = Math.round(2 + 7 * (angle + 1.05) / 1.0);
+          const row = Math.round(4 + 2 * Math.sin(t * 0.3));
+          peak.setAttribute("x", 347 + clamp(col, 0, 11) * 17);
+          peak.setAttribute("y", 56 + clamp(row, 0, 9) * 17);
+          peak.setAttribute("opacity", 0.25 + 0.75 * match);
+          score.textContent = `peak vote ${(10 + 24 * match).toFixed(0)} pixels`;
+        };
+      }
+
+      function initCorner(svg) {
+        panel(svg, 8, 16, 380, 264, "street-like junctions");
+        panel(svg, 405, 16, 207, 264, "Harris response");
+        const roads = [
+          [65, 52, 65, 245], [160, 52, 160, 245], [270, 52, 270, 245],
+          [30, 95, 360, 95], [30, 176, 360, 176], [30, 225, 360, 225]
+        ];
+        roads.forEach(([x1, y1, x2, y2]) => node("line", { x1, y1, x2, y2, stroke: "#83948a", "stroke-width": 12, "stroke-linecap": "round" }, svg));
+        const corners = [];
+        [[65,95],[65,176],[65,225],[160,95],[160,176],[160,225],[270,95],[270,176],[270,225]].forEach(([x,y]) => {
+          corners.push(node("circle", { cx: x, cy: y, r: 7, fill: colors.orange, class: "pulse" }, svg));
+        });
+        const windowRect = node("rect", { x: 35, y: 65, width: 58, height: 58, rx: 8, fill: "none", stroke: colors.blue, "stroke-width": 3, class: "dash" }, svg);
+        const matrix = [
+          node("rect", { x: 440, y: 87, width: 56, height: 56, rx: 10, fill: colors.blueSoft, stroke: colors.blue }, svg),
+          node("rect", { x: 515, y: 87, width: 56, height: 56, rx: 10, fill: colors.orangeSoft, stroke: colors.orange }, svg)
+        ];
+        label(svg, 468, 119, "gx", "svg-title", "middle");
+        label(svg, 543, 119, "gy", "svg-title", "middle");
+        const response = label(svg, 507, 198, "", "svg-value", "middle");
+        node("rect", { x: 438, y: 215, width: 138, height: 13, rx: 6.5, fill: "#e3e8e3" }, svg);
+        const meter = node("rect", { x: 438, y: 215, width: 20, height: 13, rx: 6.5, fill: colors.orange }, svg);
+        return (t) => {
+          const phase = (t * 0.18) % 1;
+          const stops = [[65,95],[130,95],[160,176],[230,176],[270,225]];
+          const scaled = phase * (stops.length - 1);
+          const i = Math.floor(scaled);
+          const q = scaled - i;
+          const a = stops[i];
+          const b = stops[Math.min(stops.length - 1, i + 1)];
+          const x = lerp(a[0], b[0], q);
+          const y = lerp(a[1], b[1], q);
+          windowRect.setAttribute("x", x - 29);
+          windowRect.setAttribute("y", y - 29);
+          const nearCorner = Math.max(...corners.map((c) => {
+            const dx = Number(c.getAttribute("cx")) - x;
+            const dy = Number(c.getAttribute("cy")) - y;
+            return Math.exp(-(dx * dx + dy * dy) / 800);
+          }));
+          matrix[0].setAttribute("opacity", 0.45 + 0.55 * nearCorner);
+          matrix[1].setAttribute("opacity", 0.25 + 0.75 * nearCorner);
+          meter.setAttribute("width", 128 * nearCorner);
+          response.textContent = `R ${(nearCorner * 0.92).toFixed(2)}`;
+        };
+      }
+
+      function initLBP(svg) {
+        panel(svg, 8, 16, 270, 264, "3 x 3 neighborhood");
+        panel(svg, 295, 16, 317, 264, "binary ring and bins");
+        const cells = [];
+        for (let r = 0; r < 3; r += 1) {
+          for (let c = 0; c < 3; c += 1) {
+            const rect = node("rect", { x: 67 + c * 55, y: 69 + r * 55, width: 48, height: 48, rx: 8, fill: "#e9eeea", stroke: r === 1 && c === 1 ? colors.orange : colors.line, "stroke-width": r === 1 && c === 1 ? 3 : 1 }, svg);
+            const text = label(svg, 91 + c * 55, 99 + r * 55, "", "svg-value", "middle");
+            cells.push({ rect, text });
+          }
+        }
+        const ring = [];
+        const ringPos = [[380,78],[435,65],[490,78],[520,132],[490,188],[435,202],[380,188],[350,132]];
+        ringPos.forEach(([x,y]) => {
+          node("circle", { cx: x, cy: y, r: 20, fill: colors.violetSoft, stroke: colors.violet }, svg);
+          ring.push(label(svg, x, y + 5, "0", "svg-title", "middle"));
+        });
+        node("circle", { cx: 435, cy: 133, r: 24, fill: colors.orangeSoft, stroke: colors.orange }, svg);
+        label(svg, 435, 138, "center", "svg-label", "middle");
+        const code = label(svg, 455, 246, "", "svg-value", "middle");
+        return (t) => {
+          const center = 50 + 8 * Math.sin(t * 0.5);
+          let transitions = 0;
+          const bits = [];
+          cells.forEach((cell, i) => {
+            const r = Math.floor(i / 3);
+            const c = i % 3;
+            const isCenter = r === 1 && c === 1;
+            const value = isCenter ? center : 50 + 24 * Math.sin(t * 0.7 + i * 1.2);
+            cell.text.textContent = Math.round(value);
+            cell.rect.setAttribute("fill", heat(value / 100));
+          });
+          const order = [0,1,2,5,8,7,6,3];
+          order.forEach((idx, i) => {
+            const r = Math.floor(idx / 3);
+            const c = idx % 3;
+            const value = 50 + 24 * Math.sin(t * 0.7 + idx * 1.2);
+            bits[i] = value > center ? 1 : 0;
+            ring[i].textContent = bits[i];
+          });
+          for (let i = 0; i < 8; i += 1) {
+            transitions += bits[i] !== bits[(i + 1) % 8] ? 1 : 0;
+          }
+          const ones = bits.reduce((a, b) => a + b, 0);
+          code.textContent = transitions <= 2 ? `uniform bin ${ones}` : `non-uniform bin 9`;
+        };
+      }
+
+      function initBlob(svg) {
+        panel(svg, 8, 16, 360, 264, "above-median mask");
+        panel(svg, 385, 16, 227, 264, "region summaries");
+        const shapes = [
+          node("path", { fill: colors.green, opacity: 0.85 }, svg),
+          node("path", { fill: colors.blue, opacity: 0.82 }, svg),
+          node("path", { fill: colors.orange, opacity: 0.78 }, svg),
+          node("path", { fill: colors.violet, opacity: 0.72 }, svg),
+          node("path", { fill: colors.yellow, opacity: 0.78 }, svg)
+        ];
+        const names = ["largest fraction", "log component count", "mean fraction"];
+        const meters = [];
+        names.forEach((name, i) => {
+          label(svg, 408, 78 + i * 60, name, "svg-label");
+          node("rect", { x: 408, y: 88 + i * 60, width: 165, height: 13, rx: 6.5, fill: "#e5eae5" }, svg);
+          meters.push(node("rect", { x: 408, y: 88 + i * 60, width: 50, height: 13, rx: 6.5, fill: i === 0 ? colors.green : i === 1 ? colors.violet : colors.blue }, svg));
+        });
+        const count = label(svg, 490, 257, "", "svg-value", "middle");
+        return (t) => {
+          const split = wave(t * 0.42);
+          const x = 35;
+          const y = 62;
+          shapes[0].setAttribute("d", `M ${x} ${y + 25} C ${x + 35} ${y - 10}, ${x + 100 - 35 * split} ${y + 8}, ${x + 115 - 35 * split} ${y + 55} C ${x + 105} ${y + 100}, ${x + 35} ${y + 105}, ${x} ${y + 70} Z`);
+          shapes[1].setAttribute("d", `M ${x + 150} ${y + 15} C ${x + 190} ${y - 5}, ${x + 285} ${y + 10}, ${x + 300} ${y + 65} C ${x + 270} ${y + 115}, ${x + 190} ${y + 105}, ${x + 155} ${y + 73} Z`);
+          const smallScale = 0.65 + 0.35 * split;
+          shapes[2].setAttribute("d", `M ${x + 40} ${y + 145} q ${25 * smallScale} ${-20 * smallScale} ${45 * smallScale} 5 q -5 ${35 * smallScale} -40 38 q -28 -10 -5 -43 Z`);
+          shapes[3].setAttribute("d", `M ${x + 130 + 40 * split} ${y + 137} q 32 -18 48 18 q -6 42 -42 40 q -34 -12 -6 -40 Z`);
+          shapes[4].setAttribute("d", `M ${x + 235} ${y + 145 - 20 * split} q 28 -25 50 2 q 6 38 -34 48 q -38 -4 -16 -50 Z`);
+          const largest = 0.46 - 0.2 * split;
+          const n = Math.round(2 + 7 * split);
+          const mean = 0.31 - 0.21 * split;
+          meters[0].setAttribute("width", 155 * largest);
+          meters[1].setAttribute("width", 155 * Math.log1p(n) / Math.log(10));
+          meters[2].setAttribute("width", 155 * mean);
+          count.textContent = `${n} connected regions`;
+        };
+      }
+
+      const initializers = {
+        "viz-spectral": initSpectral,
+        "viz-gradient": initGradient,
+        "viz-index": initIndex,
+        "viz-coherence": initCoherence,
+        "viz-orientation": initOrientation,
+        "viz-frequency": initFrequency,
+        "viz-correlation": initCorrelation,
+        "viz-index-texture": initIndexTexture,
+        "viz-hough": initHough,
+        "viz-corner": initCorner,
+        "viz-lbp": initLBP,
+        "viz-blob": initBlob
+      };
+
+      const updaters = new Map();
+      const visible = new Set();
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      let running = !reduceMotion;
+      let speed = 1;
+      let simulationTime = 0;
+      let lastFrame = performance.now();
+
+      Object.entries(initializers).forEach(([id, initializer]) => {
+        const svg = document.getElementById(id);
+        if (svg) {
+          updaters.set(svg, initializer(svg));
+        }
+      });
+
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            visible.add(entry.target);
+          } else {
+            visible.delete(entry.target);
+          }
+        });
+      }, { rootMargin: "180px 0px" });
+
+      document.querySelectorAll(".viz").forEach((svg) => observer.observe(svg));
+
+      const playToggle = document.getElementById("play-toggle");
+      const restart = document.getElementById("restart");
+      const speedSelect = document.getElementById("speed");
+      const progress = document.getElementById("page-progress");
+
+      function syncControls() {
+        document.body.classList.toggle("paused", !running);
+        playToggle.textContent = running ? "Pause animations" : "Play animations";
+        playToggle.setAttribute("aria-pressed", String(!running));
+      }
+
+      playToggle.addEventListener("click", () => {
+        running = !running;
+        lastFrame = performance.now();
+        syncControls();
+      });
+
+      restart.addEventListener("click", () => {
+        simulationTime = 0;
+        lastFrame = performance.now();
+        updaters.forEach((update) => update(0));
+      });
+
+      speedSelect.addEventListener("change", () => {
+        speed = Number(speedSelect.value);
+        lastFrame = performance.now();
+      });
+
+      window.addEventListener("scroll", () => {
+        const max = document.documentElement.scrollHeight - window.innerHeight;
+        const ratio = max > 0 ? window.scrollY / max : 0;
+        progress.style.transform = `scaleX(${clamp(ratio)})`;
+      }, { passive: true });
+
+      function frame(now) {
+        const dt = Math.min((now - lastFrame) / 1000, 0.1);
+        lastFrame = now;
+        if (running) {
+          simulationTime += dt * speed;
+          const targets = visible.size ? visible : new Set(updaters.keys());
+          targets.forEach((svg) => {
+            const update = updaters.get(svg);
+            if (update) {
+              update(simulationTime);
+            }
+          });
+        }
+        requestAnimationFrame(frame);
+      }
+
+      syncControls();
+      updaters.forEach((update) => update(0));
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
