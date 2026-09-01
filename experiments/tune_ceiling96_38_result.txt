@@ -1,0 +1,31 @@
+Regularization retune of best backward-pruned 38-feature candidate
+C selected with train CV seeds=0..2; verify A=10..19; verify B=30..39
+test policy: evaluate only after verify A, verify B, and val >= 0.960
+
+C grid selection CV
+C=0.1 select_cv=0.9499
+C=0.2 select_cv=0.9534
+C=0.3 select_cv=0.9551
+C=0.5 select_cv=0.9569
+C=0.75 select_cv=0.9587
+C=1 select_cv=0.9599
+C=1.5 select_cv=0.9608
+C=2 select_cv=0.9613
+C=3 select_cv=0.9621
+C=5 select_cv=0.9620
+C=10 select_cv=0.9620
+C=20 select_cv=0.9619
+
+selected_C=3
+k=38
+reference-class parameters=351
+select CV seeds 0..2=0.9621
+verify CV seeds 10..19=0.9620
+verify CV seeds 30..39=0.9616
+validation=0.9602
+independent_gate=PASS
+test=0.9606
+objective_gate=>96 PASS
+
+feature_idx
+325,297,316,294,144,94,145,348,292,111,206,195,298,75,37,317,287,86,291,205,323,95,17,310,29,63,197,68,329,300,319,358,314,289,65,32,361,365
