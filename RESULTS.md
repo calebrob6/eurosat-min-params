@@ -48,6 +48,42 @@ The random-split model exceeds 92% with only 5% of training data and exceeds 94%
 
 These are post-hoc data-efficiency measurements of an already selected representation, not fresh model-selection experiments at each data budget. In particular, the feature subset and `C` were selected using the full default random train/validation partitions. For the spatial evaluation, the longitude split repartitions the same 27,000 images: 4,362 of its 5,400 test samples appeared in default random train or validation and could therefore have influenced feature selection, although no test labels are used when fitting the fraction-specific heads.
 
+The same five-seed protocol was run for the exact ImageStats baseline: 52 fixed inputs formed by 13 bands × {mean, standard deviation, minimum, maximum}, followed by a standardized reference-class logistic regression with the baseline's fixed validation-selected `C=300`. Its deployed head has `9 × (52 + 1) = 477` learned parameters.
+
+| Training fraction | Images | ImageStats random test accuracy | ImageStats spatial test accuracy |
+|---:|---:|---:|---:|
+| 1% | 162 | 0.7255 ± 0.0072 | 0.6818 ± 0.0512 |
+| 2% | 324 | 0.7695 ± 0.0165 | 0.7180 ± 0.0387 |
+| 5% | 810 | 0.8196 ± 0.0086 | 0.7269 ± 0.0316 |
+| 10% | 1,620 | 0.8605 ± 0.0024 | 0.7741 ± 0.0282 |
+| 20% | 3,240 | 0.8856 ± 0.0019 | 0.8110 ± 0.0175 |
+| 50% | 8,100 | 0.9032 ± 0.0021 | 0.8359 ± 0.0122 |
+| 100% | 16,200 | **0.9096 ± 0.0000** | **0.8543 ± 0.0000** |
+
+ImageStats is consistently more data-hungry than the selected 33-feature model. At 10% of random-split training data it reaches 86.05%, compared with 94.24% for the 306-parameter model; at 100% the gap remains 5.07 points. The spatial repartition is particularly difficult for global per-band statistics, ending 5.54 points below the random split with all training data. As with the selected-feature curves, `C=300` is held fixed from the full random-split baseline rather than retuned at each fraction.
+
+## Centroid-coordinate MLPs
+
+A separate experiment tests how much of the random-split task can be solved from each patch's geographic location alone. The only source data are the WGS84 latitude and longitude of the GeoTIFF footprint centroid; no pixel values, class statistics, or image-derived features are used.
+
+The sweep covers 220 combinations of fixed coordinate encodings and ReLU MLP shapes. Encodings include raw latitude/longitude, three-dimensional spherical coordinates, polynomial bases through degree four, separable and directional Fourier features with wavelengths from 0.005° to 20°, and fixed Europe-wide Gaussian RBF grids. Architectures include one-hidden-layer widths from 2 to 128 and two-hidden-layer shapes ranging from `4×2` to `128×64`. A standardizer is fit on train and can be folded into the first layer. The 10-class output is counted in lossless reference-class form with nine explicit rows, so every learned weight and bias is included.
+
+The initial sweep uses seed 0 and validation only. Strong candidates across the parameter range are then rerun with seeds 0–4; the multi-seed validation Pareto frontier determines which models are evaluated on test. The table shows representative points from that frontier, with mean and sample standard deviation across the five seeds.
+
+| Parameters | Coordinate encoding | Hidden shape | Validation accuracy | Test accuracy |
+|---:|---|---:|---:|---:|
+| 33 | Raw latitude/longitude | 2 | 0.2514 ± 0.0328 | 0.2581 ± 0.0336 |
+| 85 | Degree-3 polynomial | 4 | 0.3317 ± 0.0085 | 0.3432 ± 0.0093 |
+| 201 | Degree-2 polynomial | 8×8 | 0.4260 ± 0.0289 | 0.4215 ± 0.0268 |
+| 457 | 11-scale axis Fourier | 8 | 0.4741 ± 0.0123 | 0.4654 ± 0.0133 |
+| 969 | 11-scale axis Fourier | 16×8 | 0.5762 ± 0.0050 | 0.5669 ± 0.0044 |
+| 1,801 | 11-scale axis Fourier | 32 | 0.6233 ± 0.0071 | 0.6148 ± 0.0053 |
+| 3,593 | 4-direction Fourier | 32×16 | 0.6440 ± 0.0061 | 0.6384 ± 0.0062 |
+| 5,385 | 11-scale axis Fourier | 64×32 | 0.6564 ± 0.0048 | 0.6558 ± 0.0079 |
+| **7,753** | **11-scale axis Fourier** | **64×64** | **0.6616 ± 0.0058** | **0.6603 ± 0.0117** |
+
+The strongest coordinate-only MLP reaches 66.03% test accuracy with 7,753 learned parameters. Wider 128-unit networks, denser directional Fourier bases, and fixed RBF grids do not improve validation accuracy. Geographic centroids therefore contain substantial random-split signal, but are far less accurate and less parameter-efficient than the 33-feature image model, which reaches 96.04% with 306 parameters.
+
 ## Image-statistics baseline
 
 The baseline computes four statistics independently for each band:
@@ -137,8 +173,10 @@ The follow-up work added the 95% frontier analysis, a configurable family list f
 ```bash
 python experiments/image_statistics_baseline.py
 python experiments/eval_training_fractions.py --download-spatial-splits
+python experiments/eval_imagestats_fractions.py --download-spatial-splits
+python experiments/coordinate_mlp.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The combined five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv`, including the model type, exact feature-set identifier and indices, parameter count, split protocol, individual seed accuracies, mean, and sample standard deviation. The evaluator verifies the official TorchGeo split checksums and remaps the existing 27,000-sample fixed-feature caches by filename. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The fraction evaluators verify the official TorchGeo split checksums and remap the existing 27,000-sample fixed-feature caches by filename. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
