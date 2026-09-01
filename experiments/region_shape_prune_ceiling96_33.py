@@ -32,6 +32,11 @@ POOL_IDX = np.array([
     86, 291, 323, 95, 17, 310, 29, 63, 197, 68, 329, 300, 314, 289, 65, 32,
     365, 2,
 ])
+FINAL_POOL_IDX = np.array([
+    325, 297, 316, 294, 144, 94, 145, 348, 206, 195, 298, 75, 37, 317, 287,
+    86, 291, 323, 95, 17, 310, 29, 63, 197, 68, 329, 314, 289, 65, 32, 365,
+    2,
+])
 REGION_SHAPE_NAME = 'tail_aniso_low_ndvi'
 C = 3.0
 GATE = 0.960
@@ -84,6 +89,9 @@ def main() -> None:
         workers=args.workers,
     )
     dropped = int(next(iter(set(init_idx) - set(idx))))
+    expected_idx = np.append(FINAL_POOL_IDX, region_idx)
+    if not np.array_equal(idx, expected_idx):
+        raise ValueError('backward elimination did not reproduce the final subset')
     select_cv = trace[-1][1]
     verify_a = mean_cv(ftr, ytr, idx, range(10, 20), C=C)
     verify_b = mean_cv(ftr, ytr, idx, range(30, 40), C=C)

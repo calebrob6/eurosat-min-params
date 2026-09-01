@@ -10,12 +10,15 @@ The current **>94% frontier** is submission 12: **94.33% test accuracy with 171 
 
 The current source-backed **>95% model** is submission 13: **95.37% test accuracy with 279 parameters**. Relative to the image-statistics baseline, it is **+4.41 percentage points more accurate while using 41.5% fewer parameters**. An experimental richer feature pool reaches **95.57% with 252 parameters**, but that result is not yet packaged as a raw-data-reproducible submission.
 
+The current experimental **>96% frontier** uses 33 fixed features and **306 learned parameters**, reaching **96.17% validation / 96.04% test accuracy** on the default random split. The 33-feature subset is explicit and reproducible from the experiment caches, but it has not yet been promoted to a standalone submission checkpoint.
+
 | Model | Fixed input features used by head | Deployable parameters | Validation | Test | Difference from image-statistics test |
 |---|---:|---:|---:|---:|---:|
 | Per-band mean/stdev/min/max + tuned logistic regression | 52 | 477 | 0.9093 | 0.9096 | — |
 | Submission 12, current >94% frontier | 18 | 171 | 0.9406 | 0.9433 | +3.37 pp |
 | Submission 13, current >95% model | 30 | 279 | 0.9531 | 0.9537 | +4.41 pp |
 | Mega-pool experimental 95% result | 27 | 252 | 0.9520 | 0.9557 | +4.61 pp |
+| Experimental >96% frontier | 33 | 306 | 0.9617 | 0.9604 | +5.08 pp |
 
 ## Evaluation protocol and parameter accounting
 
@@ -24,6 +27,26 @@ EuroSAT contains 27,000 13-band Sentinel-2 patches across 10 classes. The fixed 
 All reported feature extractors are deterministic arithmetic on an input patch and therefore have zero learned parameters. The feature standardizer is folded into the logistic-regression weights, so it adds no deployed values. A 10-class affine softmax head is shift-invariant and can store one class as an implicit zero-logit reference, reducing the exact parameter count from `10 × (F + 1)` to `9 × (F + 1)` without changing any prediction. Historical submissions 01–11 report the 10-row checkpoints they actually stored; submissions 12–13 and the baseline comparison use the tighter reference-class count.
 
 Validation accuracy on 5,400 samples has sampling variation of roughly 0.3 percentage points near these accuracies. Later experiments therefore use multi-seed train cross-validation, disjoint verification folds, and held-out validation together rather than trusting a single noisy threshold crossing.
+
+## TorchGeo spatial split and training fractions
+
+The 306-parameter model was also evaluated on TorchGeo's longitude-based `EuroSATSpatial` split. It contains the same 27,000 patches and the same 16,200/5,400/5,400 train/validation/test counts as the default split, but assigns geographically separated longitude regions to each partition. The spatial partitions are class-imbalanced, so the table reports both sample-weighted accuracy and balanced accuracy, the unweighted mean recall across the 10 classes.
+
+The 33-feature subset and `C=3` regularization remain fixed. At each fraction, the standardizer and affine head are refit using a stratified subset of the spatial training partition. Fractions below 100% report the mean and standard deviation across seeds 0–9; spatial validation and test remain fixed and are never merged into spatial head training. The deployed model remains 306 parameters at every fraction.
+
+**This is a post-hoc repartition stress test, not an independent model-selection benchmark.** The feature subset and `C` were previously selected using the default random train/validation partitions of the same 27,000 samples. Of the 5,400 spatial-test samples, 4,362 (80.8%) appeared in random train or validation and therefore could have influenced feature selection, although their spatial-test labels are not used when fitting any head reported below.
+
+| Spatial train fraction | Images | Validation accuracy | Balanced validation | Test accuracy | Balanced test |
+|---:|---:|---:|---:|---:|---:|
+| 1% | 162 | 0.8584 ± 0.0237 | 0.8324 ± 0.0259 | 0.8543 ± 0.0228 | 0.8179 ± 0.0291 |
+| 2% | 324 | 0.8801 ± 0.0173 | 0.8568 ± 0.0228 | 0.8733 ± 0.0085 | 0.8411 ± 0.0180 |
+| 5% | 810 | 0.8980 ± 0.0122 | 0.8780 ± 0.0162 | 0.8985 ± 0.0112 | 0.8671 ± 0.0138 |
+| 10% | 1,620 | 0.9177 ± 0.0070 | 0.9020 ± 0.0080 | 0.9055 ± 0.0066 | 0.8778 ± 0.0066 |
+| 20% | 3,240 | 0.9283 ± 0.0047 | 0.9131 ± 0.0056 | 0.9169 ± 0.0058 | 0.8902 ± 0.0062 |
+| 50% | 8,100 | 0.9377 ± 0.0034 | 0.9246 ± 0.0041 | 0.9247 ± 0.0038 | 0.8982 ± 0.0038 |
+| 100% | 16,200 | 0.9459 | 0.9344 | **0.9276** | **0.9017** |
+
+Under the spatial repartition, using all training data reduces test accuracy from 96.04% on the default random split to 92.76%, a 3.28-point gap. The full-data spatial model is strongest on SeaLake (99.59%), Forest (99.07%), and River (96.37%), while Pasture (71.30%), AnnualCrop (83.99%), Highway (85.59%), and PermanentCrop (86.64%) account for most of the performance loss. The learning curve remains data-limited at the top end: moving from 50% to 100% raises test accuracy from 92.47% to 92.76%.
 
 ## Image-statistics baseline
 
@@ -113,8 +136,9 @@ The follow-up work added the 95% frontier analysis, a configurable family list f
 
 ```bash
 python experiments/image_statistics_baseline.py
+python experiments/eval_spatial_fractions.py --download-splits
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. Spatial-fraction summaries, individual seed runs, and full-data per-class results are stored in `experiments/eval_spatial_fractions_result.txt`. The spatial evaluator verifies the official TorchGeo split checksums and remaps the existing 27,000-sample fixed-feature caches by filename. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
