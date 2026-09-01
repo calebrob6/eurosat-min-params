@@ -1,0 +1,23 @@
+Spectral-band anisotropy prescreen on frozen 33-feature frontier
+train-only select CV seeds=0..2; C=3; test not loaded
+baseline select_cv=0.9620 validation=0.9617
+
+                          candidate   selCV      dCV     val     dval
+               fft_band_h4_fine_pan  0.9627  +0.0007  0.9607  -0.0009
+              fft_band_h4_fine_ndbi  0.9626  +0.0006  0.9615  -0.0002
+            fft_band_h2_coarse_ndvi  0.9626  +0.0006  0.9609  -0.0007
+              fft_band_h2_fine_ndvi  0.9625  +0.0005  0.9602  -0.0015
+              fft_band_h2_fine_ndbi  0.9625  +0.0005  0.9619  +0.0002
+            fft_band_h4_coarse_ndbi  0.9624  +0.0005  0.9619  +0.0002
+            fft_band_h2_coarse_ndbi  0.9623  +0.0003  0.9613  -0.0004
+               fft_band_h2_mid_ndbi  0.9622  +0.0002  0.9633  +0.0017
+               fft_band_h4_mid_ndbi  0.9621  +0.0002  0.9615  -0.0002
+               fft_band_h2_fine_pan  0.9620  +0.0001  0.9611  -0.0006
+               fft_band_h4_mid_ndvi  0.9620  +0.0000  0.9606  -0.0011
+               fft_band_h2_mid_ndvi  0.9620  +0.0000  0.9609  -0.0007
+                fft_band_h2_mid_pan  0.9620  -0.0000  0.9615  -0.0002
+              fft_band_h4_fine_ndvi  0.9618  -0.0001  0.9626  +0.0009
+             fft_band_h4_coarse_pan  0.9618  -0.0001  0.9596  -0.0020
+                fft_band_h4_mid_pan  0.9617  -0.0002  0.9596  -0.0020
+            fft_band_h4_coarse_ndvi  0.9616  -0.0003  0.9620  +0.0004
+             fft_band_h2_coarse_pan  0.9614  -0.0005  0.9624  +0.0007
