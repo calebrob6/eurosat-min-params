@@ -28,25 +28,25 @@ All reported feature extractors are deterministic arithmetic on an input patch a
 
 Validation accuracy on 5,400 samples has sampling variation of roughly 0.3 percentage points near these accuracies. Later experiments therefore use multi-seed train cross-validation, disjoint verification folds, and held-out validation together rather than trusting a single noisy threshold crossing.
 
-## TorchGeo spatial split and training fractions
+## Training fractions on random and spatial splits
 
-The 306-parameter model was also evaluated on TorchGeo's longitude-based `EuroSATSpatial` split. It contains the same 27,000 patches and the same 16,200/5,400/5,400 train/validation/test counts as the default split, but assigns geographically separated longitude regions to each partition. The spatial partitions are class-imbalanced, so the table reports both sample-weighted accuracy and balanced accuracy, the unweighted mean recall across the 10 classes.
+The fixed model in this comparison is the experimental 306-parameter frontier: a standardized multinomial logistic regression with `C=3`, folded into a 9-row reference-class affine head. It consumes 33 deterministic features: 32 selected columns from the 377-feature mega-pool plus `tail_aniso_low_ndvi`. The selected combination contains 23 core spectral, percentile, multiscale-gradient, orientation, and index-texture features; one Hough-line feature; three Harris-corner features; two local-binary-pattern features; one connected-component feature; one coarse index-texture feature; one coarse orientation-entropy feature; and the low-NDVI region-anisotropy feature. Feature extraction has no learned parameters, so every row below still deploys exactly `9 × (33 + 1) = 306` learned values.
 
-The 33-feature subset and `C=3` regularization remain fixed. At each fraction, the standardizer and affine head are refit using a stratified subset of the spatial training partition. Fractions below 100% report the mean and standard deviation across seeds 0–9; spatial validation and test remain fixed and are never merged into spatial head training. The deployed model remains 306 parameters at every fraction.
+The model was refit on stratified 1%, 2%, 5%, 10%, 20%, 50%, and 100% subsets of both the default random training split and TorchGeo's longitude-based `EuroSATSpatial` training split. Each protocol contains 16,200 train and 5,400 test images. Results are overall test accuracy, meaning the fraction of all 5,400 test images classified correctly. Each entry is the mean and sample standard deviation across subsample seeds 0–4. At 100%, all seeds use the same full training set and the deterministic fit is identical, so the standard deviation is zero.
 
-**This is a post-hoc repartition stress test, not an independent model-selection benchmark.** The feature subset and `C` were previously selected using the default random train/validation partitions of the same 27,000 samples. Of the 5,400 spatial-test samples, 4,362 (80.8%) appeared in random train or validation and therefore could have influenced feature selection, although their spatial-test labels are not used when fitting any head reported below.
+| Training fraction | Images | Random-split test accuracy | Spatial-split test accuracy |
+|---:|---:|---:|---:|
+| 1% | 162 | 0.8674 ± 0.0103 | 0.8651 ± 0.0232 |
+| 2% | 324 | 0.8936 ± 0.0086 | 0.8742 ± 0.0100 |
+| 5% | 810 | 0.9288 ± 0.0031 | 0.8996 ± 0.0133 |
+| 10% | 1,620 | 0.9424 ± 0.0026 | 0.9054 ± 0.0083 |
+| 20% | 3,240 | 0.9491 ± 0.0017 | 0.9169 ± 0.0035 |
+| 50% | 8,100 | 0.9570 ± 0.0011 | 0.9270 ± 0.0027 |
+| 100% | 16,200 | **0.9604 ± 0.0000** | **0.9276 ± 0.0000** |
 
-| Spatial train fraction | Images | Validation accuracy | Balanced validation | Test accuracy | Balanced test |
-|---:|---:|---:|---:|---:|---:|
-| 1% | 162 | 0.8584 ± 0.0237 | 0.8324 ± 0.0259 | 0.8543 ± 0.0228 | 0.8179 ± 0.0291 |
-| 2% | 324 | 0.8801 ± 0.0173 | 0.8568 ± 0.0228 | 0.8733 ± 0.0085 | 0.8411 ± 0.0180 |
-| 5% | 810 | 0.8980 ± 0.0122 | 0.8780 ± 0.0162 | 0.8985 ± 0.0112 | 0.8671 ± 0.0138 |
-| 10% | 1,620 | 0.9177 ± 0.0070 | 0.9020 ± 0.0080 | 0.9055 ± 0.0066 | 0.8778 ± 0.0066 |
-| 20% | 3,240 | 0.9283 ± 0.0047 | 0.9131 ± 0.0056 | 0.9169 ± 0.0058 | 0.8902 ± 0.0062 |
-| 50% | 8,100 | 0.9377 ± 0.0034 | 0.9246 ± 0.0041 | 0.9247 ± 0.0038 | 0.8982 ± 0.0038 |
-| 100% | 16,200 | 0.9459 | 0.9344 | **0.9276** | **0.9017** |
+The random-split model exceeds 92% with only 5% of training data and exceeds 94% with 10%. The spatial curve is consistently harder above 1% and largely saturates between 50% and 100%; using all data leaves a 3.28-point gap relative to the random split.
 
-Under the spatial repartition, using all training data reduces test accuracy from 96.04% on the default random split to 92.76%, a 3.28-point gap. The full-data spatial model is strongest on SeaLake (99.59%), Forest (99.07%), and River (96.37%), while Pasture (71.30%), AnnualCrop (83.99%), Highway (85.59%), and PermanentCrop (86.64%) account for most of the performance loss. The learning curve remains data-limited at the top end: moving from 50% to 100% raises test accuracy from 92.47% to 92.76%.
+These are post-hoc data-efficiency measurements of an already selected representation, not fresh model-selection experiments at each data budget. In particular, the feature subset and `C` were selected using the full default random train/validation partitions. For the spatial evaluation, the longitude split repartitions the same 27,000 images: 4,362 of its 5,400 test samples appeared in default random train or validation and could therefore have influenced feature selection, although no test labels are used when fitting the fraction-specific heads.
 
 ## Image-statistics baseline
 
@@ -136,9 +136,9 @@ The follow-up work added the 95% frontier analysis, a configurable family list f
 
 ```bash
 python experiments/image_statistics_baseline.py
-python experiments/eval_spatial_fractions.py --download-splits
+python experiments/eval_training_fractions.py --download-spatial-splits
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. Spatial-fraction summaries, individual seed runs, and full-data per-class results are stored in `experiments/eval_spatial_fractions_result.txt`. The spatial evaluator verifies the official TorchGeo split checksums and remaps the existing 27,000-sample fixed-feature caches by filename. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The combined five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv`, including the model type, exact feature-set identifier and indices, parameter count, split protocol, individual seed accuracies, mean, and sample standard deviation. The evaluator verifies the official TorchGeo split checksums and remaps the existing 27,000-sample fixed-feature caches by filename. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
