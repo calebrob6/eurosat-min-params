@@ -665,3 +665,177 @@ def fit_rigl_ref_logreg_gpu(
     w_full = np.insert(w_np, ref, 0.0, axis=0)
     b_full = np.insert(b_np, ref, 0.0)
     return w_full / sigma[None, :], b_full - (w_full * (mu / sigma)[None, :]).sum(1)
+
+
+def unit_atoms(members: list[np.ndarray], rows: int = NUM_CLASSES - 1) -> np.ndarray:
+    """Build a unit-norm class dictionary from a list of class-index groups.
+
+    Each atom is an indicator over the ``rows`` non-reference classes, scaled to
+    unit L2 norm so that one stored value carries the same weight *energy*
+    whatever the group size: a weight ``p`` on a group of ``m`` classes gives
+    each member ``p / sqrt(m)``.  Magnitude pruning and gradient regrowth are
+    then comparable across atoms of different sizes, and the ridge penalty on
+    the code is the ridge penalty on the head it generates.
+    """
+    d = np.zeros((rows, len(members)), dtype=np.float64)
+    for j, group in enumerate(members):
+        idx = np.asarray(group, dtype=np.int64)
+        d[idx, j] = 1.0 / np.sqrt(len(idx))
+    return d
+
+
+def fit_rigl_dict_ref_logreg_gpu(
+    x: np.ndarray,
+    y: np.ndarray,
+    dictionary: np.ndarray,
+    nonzeros: int,
+    weight_decay: float = 1e-4,
+    epochs: int = 4000,
+    updates: int = 100,
+    drop_fraction: float = 0.5,
+    stop_fraction: float = 0.75,
+    lr: float = 0.03,
+    device: str = 'cuda',
+    ref: int = 0,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Prune-and-regrow head whose weight matrix is ``D @ P`` with ``P`` sparse.
+
+    ``fit_rigl_ref_logreg_gpu`` spends one stored value per (class, column)
+    pair, so a column that matters to eight classes costs eight values.  Here
+    the ``44 x k`` weight matrix is generated from a fixed, zero-parameter class
+    dictionary ``D [44, atoms]`` and a learned sparse code ``P [atoms, k]``: a
+    weight on a group atom pays once and reaches every class in the group.  With
+    the 44 singleton atoms in ``D`` the parameterisation contains the
+    element-wise sparse head exactly, so it can only lose by search or by
+    overfitting, never by expressiveness.
+
+    Returns:
+        ``(w_eff [K, k], b_eff [K], mask [atoms, k])`` -- the folded head acting
+        on raw features plus the code support, which ``refit_masked_dict_
+        ref_logreg_gpu`` needs to refit the same support convexly.
+    """
+    torch.manual_seed(seed)
+    mu, sigma = standardise(x)
+    xs = _to_device((x - mu) / sigma, device)
+    yt = _to_device(y, device, torch.long)
+    dt = _to_device(dictionary, device)
+    n, k = xs.shape
+    n_classes = int(y.max()) + 1
+    rows = n_classes - 1
+    atoms = dt.shape[1]
+    if dt.shape[0] != rows:
+        raise ValueError('dictionary must have one row per non-reference class')
+    if nonzeros >= atoms * k:
+        raise ValueError('nonzeros must be smaller than the dense code')
+    onehot = torch.nn.functional.one_hot(yt, n_classes).float()[:, 1:]
+
+    def dense_grad(p: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Gradient of the mean cross-entropy w.r.t. every code entry."""
+        rest = (xs @ p.T) @ dt.T + b
+        logits = torch.cat((torch.zeros_like(rest[:, :1]), rest), dim=1)
+        resid = torch.softmax(logits, dim=1)[:, 1:] - onehot
+        return dt.T @ (resid.T @ xs) / n
+
+    p = torch.zeros(atoms, k, device=device)
+    b = torch.zeros(rows, device=device)
+    flat = dense_grad(p, b).abs().reshape(-1)
+    mask = torch.zeros(atoms * k, device=device)
+    mask[torch.topk(flat, nonzeros).indices] = 1.0
+    mask = mask.reshape(atoms, k)
+    p = p.requires_grad_(True)
+    b = b.requires_grad_(True)
+
+    opt = torch.optim.Adam([p, b], lr=lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+    stop_at = int(epochs * stop_fraction)
+    every = max(1, stop_at // max(1, updates))
+    for epoch in range(epochs):
+        opt.zero_grad(set_to_none=True)
+        rest = (xs @ (p * mask).T) @ dt.T + b
+        logits = torch.cat((torch.zeros_like(rest[:, :1]), rest), dim=1)
+        loss = torch.nn.functional.cross_entropy(logits, yt)
+        loss = loss + weight_decay * ((p * mask) ** 2).sum()
+        loss.backward()
+        opt.step()
+        sched.step()
+        if epoch >= stop_at or (epoch + 1) % every or epoch == 0:
+            continue
+        frac = 0.5 * drop_fraction * (1.0 + np.cos(np.pi * epoch / stop_at))
+        swap = int(frac * nonzeros)
+        if swap < 1:
+            continue
+        with torch.no_grad():
+            active = mask.reshape(-1) > 0
+            score = torch.where(active, (p * mask).abs().reshape(-1),
+                                torch.full_like(active, float('inf'), dtype=p.dtype))
+            drop = torch.topk(score, swap, largest=False).indices
+            kept = active.clone()
+            kept[drop] = False
+            grad = dense_grad((p * mask).detach(), b.detach()).abs().reshape(-1)
+            grad[active] = -1.0
+            grow = torch.topk(grad, swap).indices
+            flat_p = p.reshape(-1)
+            flat_p[drop] = 0.0
+            flat_p[grow] = 0.0
+            new_mask = kept.float()
+            new_mask[grow] = 1.0
+            mask = new_mask.reshape(atoms, k)
+            for state_key in ('exp_avg', 'exp_avg_sq'):
+                state = opt.state[p].get(state_key)
+                if state is not None:
+                    flat_state = state.reshape(-1)
+                    flat_state[drop] = 0.0
+                    flat_state[grow] = 0.0
+    with torch.no_grad():
+        w = dt @ (p * mask)
+    w_eff, b_eff = _fold_ref(w.detach(), b.detach(), mu, sigma)
+    return w_eff, b_eff, mask.detach().cpu().numpy()
+
+
+def refit_masked_dict_ref_logreg_gpu(
+    x: np.ndarray,
+    y: np.ndarray,
+    dictionary: np.ndarray,
+    mask: np.ndarray,
+    C: float = 10.0,
+    steps: int = 300,
+    device: str = 'cuda',
+) -> tuple[np.ndarray, np.ndarray]:
+    """Refit a fixed *code* support convexly, as the element-wise head does.
+
+    The head is linear in ``P`` for a fixed ``D``, so masking the code leaves a
+    convex problem and LBFGS reaches the same optimum every time.
+    """
+    mu, sigma = standardise(x)
+    xs = _to_device((x - mu) / sigma, device)
+    yt = _to_device(y, device, torch.long)
+    dt = _to_device(dictionary, device)
+    mt = _to_device(mask, device)
+    n, k = xs.shape
+    n_classes = int(y.max()) + 1
+    p = torch.zeros(dt.shape[1], k, device=device, requires_grad=True)
+    b = torch.zeros(n_classes - 1, device=device, requires_grad=True)
+    l2 = 1.0 / (2.0 * C * n)
+    opt = torch.optim.LBFGS([p, b], max_iter=steps, history_size=20,
+                            tolerance_grad=1e-9, tolerance_change=1e-12,
+                            line_search_fn='strong_wolfe')
+
+    def closure():
+        opt.zero_grad(set_to_none=True)
+        pm = p * mt
+        rest = (xs @ pm.T) @ dt.T + b
+        logits = torch.cat((torch.zeros_like(rest[:, :1]), rest), dim=1)
+        loss = torch.nn.functional.cross_entropy(logits, yt) + l2 * (pm * pm).sum()
+        loss.backward()
+        return loss
+
+    opt.step(closure)
+    with torch.no_grad():
+        w = dt @ (p.detach() * mt)
+    return _fold_ref(w, b.detach(), mu, sigma)
+
+
+def dict_logreg_params(nonzeros: int, n_classes: int = NUM_CLASSES) -> int:
+    """Stored values of a dictionary-coded sparse reference-class head."""
+    return nonzeros + (n_classes - 1)
