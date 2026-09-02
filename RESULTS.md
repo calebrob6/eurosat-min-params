@@ -24,7 +24,7 @@ The current experimental **>96% frontier** uses 33 fixed features and **306 lear
 
 EuroSAT contains 27,000 13-band Sentinel-2 patches across 10 classes. The fixed project splits contain 16,200 train, 5,400 validation, and 5,400 test images. Models train only on the train split; validation or train-only cross-validation selects hyperparameters and feature subsets; test is the final held-out measurement.
 
-All reported feature extractors are deterministic arithmetic on an input patch and therefore have zero learned parameters. The feature standardizer is folded into the logistic-regression weights, so it adds no deployed values. A 10-class affine softmax head is shift-invariant and can store one class as an implicit zero-logit reference, reducing the exact parameter count from `10 × (F + 1)` to `9 × (F + 1)` without changing any prediction. Historical submissions 01–11 report the 10-row checkpoints they actually stored; submissions 12–13 and the baseline comparison use the tighter reference-class count.
+All reported feature extractors are deterministic arithmetic on an input patch and therefore have zero learned parameters. The feature standardizer is folded into the logistic-regression weights, so it adds no deployed values — for a head that *stores* its weights, which is every EuroSAT model here and every RESISC45 head up to the class-dictionary section. A head that *reconstructs* its weights from fixed dictionaries has to pay for the fold as well; "The standardiser was never free" prices that and re-derives the RESISC45 frontier under the tighter count. A 10-class affine softmax head is shift-invariant and can store one class as an implicit zero-logit reference, reducing the exact parameter count from `10 × (F + 1)` to `9 × (F + 1)` without changing any prediction. Historical submissions 01–11 report the 10-row checkpoints they actually stored; submissions 12–13 and the baseline comparison use the tighter reference-class count.
 
 Validation accuracy on 5,400 samples has sampling variation of roughly 0.3 percentage points near these accuracies. Later experiments therefore use multi-seed train cross-validation, disjoint verification folds, and held-out validation together rather than trusting a single noisy threshold crossing.
 
@@ -636,6 +636,13 @@ control.
 
 ## A column dictionary too: what a stored value spends on the other axis
 
+> **Repriced.** The width-2 atoms this section introduces make the deployed head
+> need one stored `sigma_i / sigma_j` per column a pair touches, which the
+> `nnz(P) + 44` count below does not include: the 208-value operating point is
+> 415 deployed values and the 320-value one is 566.  "The standardiser was never
+> free" prices it and recovers most of the difference by rounding `sigma` to a
+> power of two.
+
 The section above widened the alphabet a stored value may spell a *class*
 pattern with and halved the budget at both targets.  Its lesson was mechanical
 rather than semantic -- what paid was over-completeness, letting the support
@@ -791,6 +798,13 @@ The `+ 44` in this section's parameter count -- 21% of the budget at the
 almost entirely wasted.
 
 ## The intercept was 21% of the budget
+
+> **Repriced.** Centring at the training mean *is* an intercept, so a head with
+> `b = 0` still deploys 44 numbers and the saving below is the second copy, not
+> the first.  Once the fold is counted, the free intercept wins 77 of 84 paired
+> cells at identical deployed cost -- but coding it against *uncentred* features
+> does pay, at 16 values rather than 44, provided the convex refit is run to
+> convergence.  See "The standardiser was never free".
 
 Every RESISC45 head above has been budgeted as `nnz(P) + 44`: the sparse code
 plus one free intercept per non-reference class.  That was a rounding error
@@ -999,6 +1013,202 @@ Results are written to `experiments/resisc45_distill_result.csv` (about
 15 GPU-minutes); `resisc45_distill.py --summarise` re-prints the comparison
 from the existing CSV.
 
+## The standardiser was never free
+
+Every RESISC45 section above rests on one line of the accounting protocol: "the
+feature standardizer is folded into the logistic-regression weights, so it adds
+no deployed values."  That is exactly true of a head whose weights are
+**stored** -- folding `mu`/`sigma` into a stored matrix changes the numbers, not
+how many there are -- and it is what makes the dense heads, the element-wise
+sparse heads and the class-dictionary head honestly counted.  It stops being
+true the moment the weights are **reconstructed**.  A deployment of
+`Dc @ P @ Df.T` holds a sparse code and rebuilds
+`w_eff = (Dc @ P @ Df.T) / sigma` and `b_eff = b - sum_j W_j mu_j / sigma_j`,
+and those two divisions need numbers that are not in the code.
+`experiments/resisc45_standardiser.py` prices them and then tries to stop
+paying.
+
+**The price list.** `sep_dict_deployed_values` in `experiments/resisc45_lib.py`
+counts what a deployment must hold, always taking the cheapest way to pay:
+
+* **The code**, `nnz` values, always.
+* **The scaling**, only for column atoms of width >= 2.  A width-1 atom needs
+  nothing: `w_eff[:, j] = Dc @ P[:, j] / sigma_j`, so dividing the code entries
+  of column `j` by `sigma_j` reproduces it exactly and a per-column `sigma` is
+  *absorbable* into values the head already stores.  A width-2 atom ties two
+  columns to one value, so its deployed direction
+  `(s_i / sigma_i, s_j / sigma_j)` needs their ratio; ratios compose, so the
+  bill is one value per column a pair atom touches, minus one per connected
+  component of the graph those atoms draw.
+* **The intercept**, whenever the head stores one *or* the features are
+  centred, because centring at the training mean *is* an intercept: a head with
+  `b = 0` still deploys `b_eff = -sum_j W_j mu_j / sigma_j`.  A free intercept
+  costs `K - 1 = 44` and covers the fold too, so the two never add up.
+
+Under that price list the sections above split cleanly.  Everything up to and
+including the class-dictionary head is counted correctly: those column atoms are
+all width 1, and the 44 stored intercepts are the same 44 the fold needs.  The
+two most recent sections are not.  The pair dictionary buys width-2 atoms and
+never paid for their ratios, and the coded/`none` intercept saved the *second*
+copy of `b_eff` rather than the first.
+
+**What the pair dictionary actually costs.** The scaling bill grows with the
+budget and does not saturate, because a wider support touches more columns.
+The right-hand columns replace `sigma` with the nearest power of two, which is
+the fix described below:
+
+| Code values | `zscore` scaling | Deployed | Test | | Octave `sigma` scaling | Deployed | Test |
+|---:|---:|---:|---:|---|---:|---:|---:|
+| 64 | 59 | 167 | 0.5014 | | 10 | 118 | 0.4905 |
+| 96 | 90 | 230 | 0.5810 | | 11 | 151 | 0.5710 |
+| 128 | 116 | 288 | 0.6246 | | 11 | 183 | 0.5873 |
+| 160 | 140 | 344 | 0.6525 | | 12 | 216 | 0.6357 |
+| 208 | 163 | 415 | 0.6752 | | 11 | 263 | 0.6687 |
+| 256 | 187 | 487 | 0.7021 | | 12 | 312 | 0.6765 |
+| 320 | 202 | 566 | 0.7183 | | 12 | 376 | 0.6994 |
+| 384 | 209 | 637 | 0.7265 | | 12 | 440 | 0.7083 |
+| 512 | 217 | 773 | 0.7413 | | 13 | 569 | 0.7310 |
+| 640 | 229 | 913 | 0.7524 | | 14 | 698 | 0.7292 |
+
+So the operating points the two sections above reported are, priced honestly:
+the **208** stored values that first cleared 65% are **424** deployed values --
+the `none` arm at 208 code values reproduces the intercept section's 0.6625
+exactly, and adds 44 for the fold's `b_eff` and 172 for the ratios -- and the
+**304** that first cleared 70% are **542**.
+
+**Rounding `sigma` to a power of two makes the pair dictionary nearly free.**
+Two columns in the same octave are scaled by the *same* number, so their pair's
+ratio is 1 and the shared factor is absorbable exactly like a width-1 atom's;
+pairs across octaves then need one value per octave rather than one per atom.
+The 512 candidate columns span 19 octaves, so the whole 65,792-atom pair
+dictionary costs **10 to 14 values at every budget** instead of 59 to 229.
+Conditioning is barely touched -- each column's scaled standard deviation lands
+in `[1/sqrt(2), sqrt(2)]` -- and the price is 0.7 to 2.6 points of test accuracy
+at equal *code* size against 128 to 215 fewer deployed values.  Restricting the
+enumeration to within-octave pairs (`pairsbuck`, 6,478 atoms) removes the last
+10 to 14 values and is a wash against the full enumeration.
+
+**Once the fold is priced, a free intercept is the cheap one.** A centred head
+deploys 44 intercept values whether or not it stores any, so `free` and `none`
+cost the same and the only question is which fits better.  Over 84 paired cells
+-- four column dictionaries times 21 budgets -- `free` wins **77** and loses 7,
+by a mean of +1.16 points, at a mean deployed difference of +0.1 values.  The
+intercept section's headline does not survive the repricing: it saved 44 stored
+values that a deployment has to spend anyway.
+
+**What does beat 44 is coding the intercept -- but only with a converged
+refit.** Take the support found on centred features, approximate the deployed
+`b_eff` by `q` class-dictionary atoms with matching pursuit, and refit convexly
+on *uncentred* features, where the coded intercept is the only intercept there
+is.  The result depends almost entirely on how long LBFGS runs, because the
+uncentred problem is far worse conditioned than the centred one:
+
+| Code values | Arm | 300 steps | 1,200 steps | 4,000 steps |
+|---:|---|---:|---:|---:|
+| 208 | `zscore/identity/none+mp16` | 0.5603 | 0.6156 | 0.6427 |
+| 208 | `zscore/identity/none+mp44` | 0.5743 | 0.6213 | 0.6460 |
+| 208 | `zbuck/pairsbuck/none+mp16` | 0.5613 | 0.6283 | 0.6476 |
+| 256 | `zscore/identity/none+mp16` | 0.6011 | 0.6298 | 0.6537 |
+| 256 | `zbuck/pairsbuck/none+mp44` | 0.6046 | 0.6446 | 0.6657 |
+
+At 300 steps -- the setting every other refit in this file uses, and the one at
+which every centred head is already converged -- the re-coding looks like a
+4-to-6-point disaster.  At 4,000 it is a win: `q = 16` costs 16 values instead
+of 44 and gives back 0.2 points or less.  The control that makes this safe is
+that the *centred* rows do not move at all: 20 base rows measured at both 300
+and 4,000 steps are identical to four decimals, so the extra steps buy nothing
+except a converged uncentred fit.  Whether the constant column sits inside the
+L2 penalty is worth at most 0.3 points either way, with no consistent sign.
+
+**The honest frontier.** Validation picks the arm at each deployed-value
+ceiling; test is read once.
+
+| Deployed <= | Selected arm | Values | Bits | Columns | Steps | Validation | Test |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 128 | `zbuck` pairs256 `free` | 118 | 5,966 | 79 | 300 | 0.5060 | 0.4905 |
+| 160 | `zbuck` pairs256 `free` | 151 | 8,060 | 103 | 300 | 0.5860 | 0.5710 |
+| 192 | `zbuck` pairsbuck `free` | 172 | 9,292 | 123 | 300 | 0.6163 | 0.5971 |
+| **224** | `zbuck` pairsbuck `free+mp16` | 224 | 13,656 | 169 | 4,000 | 0.6735 | **0.6540** |
+| 256 | `zbuck` pairs256 `free+mp16` | 251 | 15,800 | 168 | 4,000 | 0.6935 | 0.6729 |
+| 272 | `zbuck` pairs256 `free+mp16` | 251 | 15,800 | 168 | 4,000 | 0.6935 | 0.6729 |
+| 288 | `zbuck` pairs256 `free` | 279 | 16,215 | 168 | 300 | 0.6954 | 0.6740 |
+| 304 | `zbuck` pairsbuck `free` | 300 | 17,003 | 189 | 300 | 0.6975 | 0.6754 |
+| 320 | `zbuck` pairs256 `free` | 312 | 18,269 | 180 | 300 | 0.7076 | 0.6765 |
+| 352 | `zbuck` pairs256 `free+mp16` | 348 | 21,880 | 204 | 4,000 | 0.7165 | 0.6902 |
+| **384** | `zbuck` pairsbuck `free+mp32` | 384 | 23,156 | 223 | 4,000 | 0.7275 | **0.7100** |
+| 416 | `zbuck` pairsbuck `free` | 396 | 22,686 | 223 | 300 | 0.7332 | 0.7119 |
+| 448 | `zbuck` pairs256 `free` | 440 | 26,301 | 211 | 300 | 0.7338 | 0.7083 |
+| 480 | `zbuck` pairsbuck `free` | 460 | 26,546 | 239 | 300 | 0.7392 | 0.7143 |
+| 512 | `zbuck` pairsbuck `free` | 492 | 28,380 | 243 | 300 | 0.7424 | 0.7202 |
+| 640 | `zbuck` pairs256 `free` | 537 | 32,360 | 245 | 300 | 0.7529 | 0.7387 |
+| 768 | `zscore` pairs256 `free` | 750 | 38,403 | 264 | 300 | 0.7600 | 0.7363 |
+| 1,024 | `zscore` pairs256 `free` | 913 | 48,420 | 284 | 300 | 0.7735 | 0.7524 |
+
+**65%** test is first cleared at **224 deployed values** and **70%** at **384**,
+against a dense affine head's 2,156 and 2,860 -- which need no repricing,
+because a dense head stores its weights.  That is **9.6x** and **7.4x**, and
+both sit well inside the 1,024-value target this work was set.  Against the
+repriced 424 and 542 above, the octave-rounded standardiser plus a coded
+intercept is worth **1.9x** and **1.4x**; against the class-dictionary section,
+which was correctly counted at 256 and 448, it is worth 1.1x at both.
+
+**Two ways of not paying for the standardiser that do not work.**
+
+* *Search on uncentred features.* With `mu = 0` the fold supplies no intercept,
+  so a coded one is the only intercept there is and the centring bill is zero
+  from the start.  The prune-and-regrow search then collapses to 2-4% test at
+  every budget: with a median `|mu| / sigma` of 3.4 over the pool, the dense
+  loss gradient at `w = 0` is dominated by the column means, which point in
+  nearly the same class direction for every column, so the initial support and
+  every regrow step spend themselves on rank-1 mean structure.  Centring is not
+  a conditioning convenience for this search, it is what makes the regrow
+  criterion informative -- which is why the re-coding above searches on centred
+  features and only *refits* uncentred.
+* *Share `sigma` per feature family.* Within-family standard deviations span up
+  to 16.7 octaves in this pool, so a shared family `sigma` reproduces the
+  uncentred failure exactly (3.98% test at 160 code values).  Octaves work
+  because they bound the distortion to a factor of `sqrt(2)`; families do not,
+  because a family is not a scale.
+
+Reproduce with:
+
+```bash
+R=experiments/resisc45_standardiser
+MAIN="zscore/pairs256/free zscore/pairs256/none zscore/identity/none \
+      zbuck/pairsbuck/none zbuck/pairs256/none"
+FREE="zscore/pairs256/free zbuck/pairs256/free zbuck/pairsbuck/free \
+      zscore/identity/free"
+BUCK="zbuck/pairs256/free zbuck/pairsbuck/free"
+FINE="176 208 240 272 304 352 416 480"
+python $R.py                                                       --out ${R}_a.csv
+python $R.py --budgets $FINE --arms $MAIN                          --out ${R}_b.csv
+python $R.py --budgets $FINE --arms $FREE                          --out ${R}_c.csv
+python $R.py --budgets 208 256 352 448 --unpenalised-bias \
+  --arms zscore/pairs256/free zscore/identity/none zbuck/pairsbuck/none \
+                                                                   --out ${R}_d.csv
+python $R.py --budgets 208 256 --steps 1200 --unpenalised-bias \
+  --arms zscore/identity/none zbuck/pairsbuck/none                 --out ${R}_e.csv
+python $R.py --budgets 208 256 --steps 4000 \
+  --arms zscore/identity/none zbuck/pairsbuck/none                 --out ${R}_f.csv
+python $R.py --budgets 192 208 224 240 --steps 4000 --mp-grid 8 16 32 \
+  --arms $BUCK --mp-arms $BUCK                                     --out ${R}_g.csv
+python $R.py --budgets 288 320 352 384 --steps 4000 --mp-grid 8 16 32 \
+  --arms $BUCK --mp-arms $BUCK                                     --out ${R}_h.csv
+python $R.py --merge ${R}_[a-h].csv
+```
+
+The passes are independent and were run two at a time across two GPUs; `--merge`
+keys rows by `(budget, arm, steps)` and refuses to combine files that disagree,
+which is also the cross-GPU determinism check.  The committed CSV is the union
+of what was actually run: re-running the list above additionally fills in the
+`q = 44` re-coding at every budget rather than only at four, because `MP_GRID`
+gained that entry once the `q = 32` curve turned out to be flat.  Results are written to
+`experiments/resisc45_standardiser_result.csv` (about four GPU-hours in total,
+most of it the 4,000-step refits); `resisc45_standardiser.py --summarise`
+re-prints the price list, the equal-code tables, the intercept re-coding, the
+convergence table and the honest frontier from the existing CSV.
+
+
 ## Image-statistics baseline
 
 The baseline computes four statistics independently for each band:
@@ -1083,6 +1293,8 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | Semantically chosen class groups for the RESISC45 dictionary head | Ward class groups from the pool or from the dense head's own rows beat size-matched random groups by 0.9 points at 256 stored values and by 0.03 at 1,024; the atom count is worth several times more than the atom content, and a random draw is as good as a designed one |
 | Distillation into the budgeted RESISC45 head | A 79.4%-test full-pool logistic teacher, cross-fitted or not, plus a candidate-list teacher and label smoothing as controls, all lose: 31 of 32 distilled arms fall below the hard-label head at 208 and 256 stored values, by up to 5.8 points, and the loss grows monotonically with temperature. A linear student in the teacher's own hypothesis class gains nothing from softened targets and loses gradient signal on the decisions its few weights must get right |
 | A free intercept for the RESISC45 dictionary head | The 44 intercepts are worth 0 to 3 stored values, not 44: a head with no intercept in the standardised space matches or beats a coded one at every budget, because the standardiser fold already supplies `b_eff = -sum_j W_j mu_j / sigma_j` and the splits are class-balanced. Above 192 stored values the saving is inside the split's resolution, so it only matters where the head is starved |
+| Fitting the RESISC45 head on uncentred features | Dropping the centring removes the fold's 44-value deployed intercept at the source, but the prune-and-regrow search then collapses to 2-4% test at every budget: with a median `\|mu\| / sigma` of 3.4 the dense loss gradient at `w = 0` is dominated by the column means, which point in nearly the same class direction for every column, so the support fills with rank-1 mean structure. Centring is what makes the regrow criterion informative; the search has to see centred features even when the deployed head does not |
+| Sharing one `sigma` per feature family | Within-family standard deviations span up to 16.7 octaves in this pool, so a family-shared `sigma` reproduces the uncentred collapse exactly (3.98% test at 160 code values). Sharing per power-of-two octave works instead, because it bounds the distortion to `sqrt(2)` while still making within-octave pair atoms cost nothing |
 | Class singletons in the RESISC45 class dictionary | Prepending the 44 identity atoms to the Gaussian class dictionary, which makes a coded intercept able to reproduce a free one exactly, reads 0.6302 at 160 stored values and 0.6743 at 256 against 0.6290 and 0.6863 without them -- the same verdict on designed atoms the class-dictionary section reached |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
@@ -1116,8 +1328,9 @@ python experiments/resisc45_class_dict.py
 python experiments/resisc45_feature_dict.py
 python experiments/resisc45_coded_bias.py
 python experiments/resisc45_distill.py
+python experiments/resisc45_standardiser.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, the support-search probe writes `experiments/resisc45_support_probe_result.csv`, the class-dictionary head writes `experiments/resisc45_class_dict_result.csv`, the column-dictionary head writes `experiments/resisc45_feature_dict_result.csv`, the intercept comparison writes `experiments/resisc45_coded_bias_result.csv`, and the distillation comparison writes `experiments/resisc45_distill_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, the support-search probe writes `experiments/resisc45_support_probe_result.csv`, the class-dictionary head writes `experiments/resisc45_class_dict_result.csv`, the column-dictionary head writes `experiments/resisc45_feature_dict_result.csv`, the intercept comparison writes `experiments/resisc45_coded_bias_result.csv`, the distillation comparison writes `experiments/resisc45_distill_result.csv`, and the standardiser repricing writes `experiments/resisc45_standardiser_result.csv` (the single command above runs only the first of its nine passes; the full command list is in that section). Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.

@@ -847,6 +847,85 @@ def sep_dict_logreg_params(nonzeros: int, bias: str = 'free',
     return nonzeros + (n_classes - 1 if bias == 'free' else 0)
 
 
+def sep_dict_deployed_values(
+    support: np.ndarray,
+    feat_dict: np.ndarray,
+    fatoms: int,
+    bias: str = 'free',
+    centred: bool = True,
+    scale_groups: np.ndarray | None = None,
+    n_classes: int = NUM_CLASSES,
+) -> dict[str, int]:
+    """Everything a deployment of a separable-dictionary head must store.
+
+    ``sep_dict_logreg_params`` counts the code and the intercept.  It does not
+    count the standardiser, on the convention that folding ``mu``/``sigma`` into
+    the weights costs nothing -- which is true of a head whose weights are
+    *stored*, and false of one whose weights are *reconstructed* from fixed
+    dictionaries, because the reconstruction needs the fold's numbers too.  This
+    prices the difference exactly, always taking the cheapest way to pay:
+
+    * **the code**, ``nnz`` values, always;
+    * **the intercept**, whenever the head stores one *or* the features are
+      centred -- a centred head with ``b = 0`` still deploys
+      ``b_eff = -sum_j W_j mu_j / sigma_j``.  A free intercept costs ``K - 1``
+      and covers the fold too, so the two never add up; a centred head without
+      one pays the cheaper of ``K - 1`` and one value per distinct column atom
+      used (``b_eff`` is then a code-weighted sum of ``Df[:, f] . mu / sigma``).
+    * **the scaling**, only for column atoms of width >= 2.  A width-1 atom
+      needs nothing: ``w_eff[:, j] = Dc @ P[:, j] / sigma_j``, so dividing the
+      code entries of column ``j`` by ``sigma_j`` reproduces it exactly and a
+      per-column ``sigma`` is *absorbable* into values the head already stores.
+      A width-2 atom ties two columns to one value, so its deployed direction
+      ``(s_i / sigma_i, s_j / sigma_j)`` needs their ratio -- and ratios compose,
+      so the bill is one value per column touched by a wide atom *minus one per
+      connected component* of the graph those atoms draw, not one per atom.
+      ``scale_groups`` gives a group id per column when ``sigma`` is shared
+      inside a group, which collapses every within-group ratio to 1; a single
+      group therefore prices ``sigma = 1``, no scaling at all, at zero.
+    """
+    nnz = len(support)
+    atoms = np.unique(np.asarray(support) % fatoms)
+    if bias == 'coded':
+        # The constant column owns the last atom of the augmented dictionary; it
+        # is width 1 and carries no scaling of its own.
+        atoms = atoms[atoms != fatoms - 1]
+    if feat_dict.shape[1] != fatoms - (1 if bias == 'coded' else 0):
+        raise ValueError('feat_dict must be the *un-augmented* column dictionary')
+    used = np.asarray(feat_dict)[:, atoms] != 0.0
+    groups = np.arange(feat_dict.shape[0]) if scale_groups is None else np.asarray(
+        scale_groups)
+    parent: dict[int, int] = {}
+
+    def find(node: int) -> int:
+        while parent.setdefault(node, node) != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    touched: set[int] = set()
+    for column in np.flatnonzero(used.sum(0) >= 2):
+        members = np.unique(groups[used[:, column]])
+        touched.update(int(m) for m in members)
+        for other in members[1:]:
+            parent[find(int(other))] = find(int(members[0]))
+    ratios = len(touched) - len({find(g) for g in touched})
+    if bias == 'free':
+        intercept = n_classes - 1
+    elif centred:
+        intercept = min(n_classes - 1, len(atoms))
+    else:
+        intercept = 0
+    wide = int(np.unique(np.flatnonzero(used[:, used.sum(0) >= 2].any(1))).size)
+    return {'code': nnz, 'intercept': intercept, 'scaling': ratios,
+            'total': nnz + intercept + ratios,
+            # A shared sigma is one value for many columns, so a deployment also
+            # has to say which of them each column uses: charged in bits, like
+            # the atom ids, because it is an index rather than a number.
+            'scale_ids': 0 if scale_groups is None else wide,
+            'scale_groups': len(touched)}
+
+
 def feature_atoms(
     columns: int, count: int, width: int, seed: int = 0, identity: bool = True
 ) -> np.ndarray:
@@ -979,6 +1058,7 @@ def fit_rigl_sep_dict_ref_logreg_gpu(
     alpha: float = 0.0,
     temperature: float = 1.0,
     bias: str = 'free',
+    moments: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Prune-and-regrow head whose weights are ``Dc @ P @ Df.T`` with ``P`` sparse.
 
@@ -1009,13 +1089,20 @@ def fit_rigl_sep_dict_ref_logreg_gpu(
     altogether, the control that says whether a *cheap* intercept is worth
     anything or the 44 values were simply wasted.
 
+    ``moments`` overrides the ``(mu, sigma)`` the features are standardised
+    with, which is the only thing that decides how many values a *deployment*
+    must store on top of the code: see ``sep_dict_deployed_values``.  Passing
+    ``(zeros, sigma)`` drops the centring, ``(zeros, ones)`` drops the
+    standardiser altogether, and a family-shared or power-of-two ``sigma``
+    trades a little conditioning for a much cheaper one.
+
     Returns:
         ``(w_eff [K, k], b_eff [K], support [nnz])`` -- the folded head acting
         on raw features plus the flat ``catoms * fatoms`` support indices, which
         ``refit_masked_sep_dict_ref_logreg_gpu`` needs to refit convexly.
     """
     torch.manual_seed(seed)
-    mu, sigma = standardise(x)
+    mu, sigma = standardise(x) if moments is None else moments
     xs = _to_device((x - mu) / sigma, device)
     yt = _to_device(y, device, torch.long)
     dc = _to_device(class_dict, device)
@@ -1120,14 +1207,23 @@ def refit_masked_sep_dict_ref_logreg_gpu(
     alpha: float = 0.0,
     temperature: float = 1.0,
     bias: str = 'free',
+    moments: tuple[np.ndarray, np.ndarray] | None = None,
+    penalise_bias: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Refit a fixed separable-code support convexly, as the other heads do.
 
     The optional distillation term is convex in the code values too -- a
     cross-entropy against a *fixed* target distribution -- so the refit keeps
     the property that makes it worth doing after the first-order search.
+    ``moments`` must match the one the support was searched with.
+    ``penalise_bias`` decides whether code entries on a coded head's constant
+    column are inside the L2 penalty.  The default keeps them there, which is
+    what every earlier result in this file was fitted with; clearing it gives
+    the intercept the unpenalised treatment a conventional logistic regression
+    gives its own, which matters when the intercept is the *only* one the
+    deployed head has.
     """
-    mu, sigma = standardise(x)
+    mu, sigma = standardise(x) if moments is None else moments
     xs = _to_device((x - mu) / sigma, device)
     yt = _to_device(y, device, torch.long)
     dc = _to_device(class_dict, device)
@@ -1141,6 +1237,9 @@ def refit_masked_sep_dict_ref_logreg_gpu(
     index = torch.as_tensor(support, device=device, dtype=torch.long)
     dc_sel = dc[:, index // fatoms]
     df_sel = df[:, index % fatoms]
+    penalised = torch.ones(len(index), device=device)
+    if code_bias and not penalise_bias:
+        penalised[index % fatoms == fatoms - 1] = 0.0
     value = torch.zeros(len(index), device=device, requires_grad=True)
     b = torch.zeros(n_classes - 1, device=device, requires_grad=bias == 'free')
     soft = None if teacher_logits is None or alpha <= 0.0 else soft_targets(
@@ -1159,7 +1258,7 @@ def refit_masked_sep_dict_ref_logreg_gpu(
         if soft is not None:
             kd = -(soft * torch.log_softmax(logits / temperature, dim=1)).sum(1).mean()
             loss = (1.0 - alpha) * loss + alpha * temperature * temperature * kd
-        loss = loss + l2 * (value * value).sum()
+        loss = loss + l2 * (penalised * value * value).sum()
         loss.backward()
         return loss
 
