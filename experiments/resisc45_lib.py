@@ -841,6 +841,12 @@ def dict_logreg_params(nonzeros: int, n_classes: int = NUM_CLASSES) -> int:
     return nonzeros + (n_classes - 1)
 
 
+def sep_dict_logreg_params(nonzeros: int, bias: str = 'free',
+                          n_classes: int = NUM_CLASSES) -> int:
+    """Stored values for a separable-dictionary head under each intercept rule."""
+    return nonzeros + (n_classes - 1 if bias == 'free' else 0)
+
+
 def feature_atoms(
     columns: int, count: int, width: int, seed: int = 0, identity: bool = True
 ) -> np.ndarray:
@@ -869,6 +875,17 @@ def feature_atoms(
             atoms[rows, np.arange(count)[:, None]] = signs
         blocks.append(atoms / np.linalg.norm(atoms, axis=0, keepdims=True))
     return np.concatenate(blocks, axis=1)
+
+
+def soft_targets(teacher_logits: np.ndarray, temperature: float,
+                 device: str = 'cuda') -> torch.Tensor:
+    """Teacher class distribution at ``temperature``, as a device tensor.
+
+    The distillation arms hand the fitters *logits* rather than probabilities so
+    the temperature stays a property of the student's loss, not of the cached
+    teacher.
+    """
+    return torch.softmax(_to_device(teacher_logits, device) / temperature, dim=1)
 
 
 def _sep_dense_grad(dc: torch.Tensor, df: torch.Tensor,
@@ -920,6 +937,29 @@ class _SparseCode:
                             value=-lr)
 
 
+def _augment_bias(xs: torch.Tensor, df: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Append a constant column and its own identity atom.
+
+    A head over the augmented columns has no separate intercept: the last
+    column's weight *is* the intercept, so it is drawn from the same sparse code
+    as every other weight and competes for the same stored values.
+    """
+    n, k = xs.shape
+    fatoms = df.shape[1]
+    xs = torch.cat((xs, torch.ones(n, 1, device=xs.device)), dim=1)
+    df = torch.cat((torch.cat((df, torch.zeros(k, 1, device=df.device)), dim=1),
+                    torch.zeros(1, fatoms + 1, device=df.device)), dim=0)
+    df[k, fatoms] = 1.0
+    return xs, df
+
+
+def _fold_coded(w: torch.Tensor, b: torch.Tensor, mu, sigma, code_bias: bool):
+    """``_fold_ref`` for a head that may carry its intercept as a coded column."""
+    if not code_bias:
+        return _fold_ref(w, b, mu, sigma)
+    return _fold_ref(w[:, :-1], b + w[:, -1], mu, sigma)
+
+
 def fit_rigl_sep_dict_ref_logreg_gpu(
     x: np.ndarray,
     y: np.ndarray,
@@ -935,6 +975,10 @@ def fit_rigl_sep_dict_ref_logreg_gpu(
     device: str = 'cuda',
     ref: int = 0,
     seed: int = 0,
+    teacher_logits: np.ndarray | None = None,
+    alpha: float = 0.0,
+    temperature: float = 1.0,
+    bias: str = 'free',
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Prune-and-regrow head whose weights are ``Dc @ P @ Df.T`` with ``P`` sparse.
 
@@ -946,6 +990,24 @@ def fit_rigl_sep_dict_ref_logreg_gpu(
     parameterisation is exactly the class-dictionary head, and with both
     identity it is the element-wise head, so neither control can lose by
     expressiveness.
+
+    ``teacher_logits`` optionally adds a distillation term to the loss the
+    search descends *and* to the regrow criterion, which is the same gradient:
+    ``(1 - alpha) * CE(hard) + alpha * T^2 * KL(teacher_T || student_T)``.  It
+    costs no stored values, and ``alpha == 0`` reproduces the hard-label fit
+    exactly.
+
+    ``bias`` decides how the intercept is paid for.  ``'free'`` keeps the
+    44-value intercept every earlier head carried.  ``'coded'`` moves it
+    *inside* the code: a constant column is appended to the standardised
+    features and a matching identity atom to ``Df``, so the head is a
+    bias-free ``Dc @ P @ Df.T`` over ``k + 1`` columns and the budget is
+    ``nnz`` alone rather than ``nnz + 44`` -- the search then decides how many
+    stored values an intercept is worth instead of being charged for a fixed
+    one, and spending 44 of them reproduces the free intercept exactly whenever
+    ``Dc`` contains the class singletons.  ``'none'`` drops the intercept
+    altogether, the control that says whether a *cheap* intercept is worth
+    anything or the 44 values were simply wasted.
 
     Returns:
         ``(w_eff [K, k], b_eff [K], support [nnz])`` -- the folded head acting
@@ -966,17 +1028,28 @@ def fit_rigl_sep_dict_ref_logreg_gpu(
         raise ValueError('class dictionary must have one row per non-reference class')
     if df.shape[0] != k:
         raise ValueError('feature dictionary must have one row per column')
+    if bias not in ('free', 'coded', 'none'):
+        raise ValueError("bias must be 'free', 'coded' or 'none'")
+    code_bias = bias == 'coded'
+    if code_bias:
+        xs, df = _augment_bias(xs, df)
+        k, fatoms = k + 1, fatoms + 1
     if nonzeros >= catoms * fatoms:
         raise ValueError('nonzeros must be smaller than the dense code')
     onehot = torch.nn.functional.one_hot(yt, n_classes).float()[:, 1:]
+    soft = None if teacher_logits is None or alpha <= 0.0 else soft_targets(
+        teacher_logits, temperature, device)
 
     def residual(w: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         """``dL/dW`` at the given head, i.e. the gradient w.r.t. every weight."""
         logits = torch.cat((torch.zeros(n, 1, device=device), xs @ w.T + b), dim=1)
         resid = torch.softmax(logits, dim=1)[:, 1:] - onehot
+        if soft is not None:
+            resid = (1.0 - alpha) * resid + alpha * temperature * (
+                torch.softmax(logits / temperature, dim=1)[:, 1:] - soft[:, 1:])
         return (resid.T @ xs) / n
 
-    b = torch.zeros(rows, device=device, requires_grad=True)
+    b = torch.zeros(rows, device=device, requires_grad=bias == 'free')
     with torch.no_grad():
         start = _sep_dense_grad(dc, df, residual(torch.zeros(rows, k, device=device),
                                                  b.detach())).abs().reshape(-1)
@@ -997,15 +1070,20 @@ def fit_rigl_sep_dict_ref_logreg_gpu(
         w = (dc_sel * value) @ df_sel.T
         logits = torch.cat((torch.zeros(n, 1, device=device), xs @ w.T + b), dim=1)
         loss = torch.nn.functional.cross_entropy(logits, yt)
+        if soft is not None:
+            kd = -(soft * torch.log_softmax(logits / temperature, dim=1)).sum(1).mean()
+            loss = (1.0 - alpha) * loss + alpha * temperature * temperature * kd
         loss = loss + weight_decay * (value * value).sum()
-        grad_v, grad_b = torch.autograd.grad(loss, (value, b))
+        targets = (value, b) if bias == 'free' else (value,)
+        grads = torch.autograd.grad(loss, targets)
         with torch.no_grad():
-            code.adam(grad_v, step_lr)
-            b_avg.mul_(0.9).add_(grad_b, alpha=0.1)
-            b_avg_sq.mul_(0.999).addcmul_(grad_b, grad_b, value=0.001)
-            bias1 = 1 - 0.9 ** (epoch + 1)
-            bias2 = 1 - 0.999 ** (epoch + 1)
-            b -= step_lr * (b_avg / bias1) / ((b_avg_sq / bias2).sqrt() + 1e-8)
+            code.adam(grads[0], step_lr)
+            if bias == 'free':
+                b_avg.mul_(0.9).add_(grads[1], alpha=0.1)
+                b_avg_sq.mul_(0.999).addcmul_(grads[1], grads[1], value=0.001)
+                bias1 = 1 - 0.9 ** (epoch + 1)
+                bias2 = 1 - 0.999 ** (epoch + 1)
+                b -= step_lr * (b_avg / bias1) / ((b_avg_sq / bias2).sqrt() + 1e-8)
         if epoch >= stop_at or (epoch + 1) % every or epoch == 0:
             continue
         frac = 0.5 * drop_fraction * (1.0 + np.cos(np.pi * epoch / stop_at))
@@ -1025,7 +1103,7 @@ def fit_rigl_sep_dict_ref_logreg_gpu(
             dc_sel, df_sel = gathers()
     with torch.no_grad():
         w = (dc_sel * code.value) @ df_sel.T
-    w_eff, b_eff = _fold_ref(w.detach(), b.detach(), mu, sigma)
+    w_eff, b_eff = _fold_coded(w.detach(), b.detach(), mu, sigma, code_bias)
     return w_eff, b_eff, code.index.cpu().numpy()
 
 
@@ -1038,8 +1116,17 @@ def refit_masked_sep_dict_ref_logreg_gpu(
     C: float = 10.0,
     steps: int = 300,
     device: str = 'cuda',
+    teacher_logits: np.ndarray | None = None,
+    alpha: float = 0.0,
+    temperature: float = 1.0,
+    bias: str = 'free',
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Refit a fixed separable-code support convexly, as the other heads do."""
+    """Refit a fixed separable-code support convexly, as the other heads do.
+
+    The optional distillation term is convex in the code values too -- a
+    cross-entropy against a *fixed* target distribution -- so the refit keeps
+    the property that makes it worth doing after the first-order search.
+    """
     mu, sigma = standardise(x)
     xs = _to_device((x - mu) / sigma, device)
     yt = _to_device(y, device, torch.long)
@@ -1047,14 +1134,20 @@ def refit_masked_sep_dict_ref_logreg_gpu(
     df = _to_device(feat_dict, device)
     n = xs.shape[0]
     n_classes = int(y.max()) + 1
+    code_bias = bias == 'coded'
+    if code_bias:
+        xs, df = _augment_bias(xs, df)
     fatoms = df.shape[1]
     index = torch.as_tensor(support, device=device, dtype=torch.long)
     dc_sel = dc[:, index // fatoms]
     df_sel = df[:, index % fatoms]
     value = torch.zeros(len(index), device=device, requires_grad=True)
-    b = torch.zeros(n_classes - 1, device=device, requires_grad=True)
+    b = torch.zeros(n_classes - 1, device=device, requires_grad=bias == 'free')
+    soft = None if teacher_logits is None or alpha <= 0.0 else soft_targets(
+        teacher_logits, temperature, device)
     l2 = 1.0 / (2.0 * C * n)
-    opt = torch.optim.LBFGS([value, b], max_iter=steps, history_size=20,
+    opt = torch.optim.LBFGS([value, b] if bias == 'free' else [value], max_iter=steps,
+                            history_size=20,
                             tolerance_grad=1e-9, tolerance_change=1e-12,
                             line_search_fn='strong_wolfe')
 
@@ -1062,14 +1155,18 @@ def refit_masked_sep_dict_ref_logreg_gpu(
         opt.zero_grad(set_to_none=True)
         w = (dc_sel * value) @ df_sel.T
         logits = torch.cat((torch.zeros(n, 1, device=device), xs @ w.T + b), dim=1)
-        loss = torch.nn.functional.cross_entropy(logits, yt) + l2 * (value * value).sum()
+        loss = torch.nn.functional.cross_entropy(logits, yt)
+        if soft is not None:
+            kd = -(soft * torch.log_softmax(logits / temperature, dim=1)).sum(1).mean()
+            loss = (1.0 - alpha) * loss + alpha * temperature * temperature * kd
+        loss = loss + l2 * (value * value).sum()
         loss.backward()
         return loss
 
     opt.step(closure)
     with torch.no_grad():
         w = (dc_sel * value.detach()) @ df_sel.T
-    return _fold_ref(w, b.detach(), mu, sigma)
+    return _fold_coded(w, b.detach(), mu, sigma, code_bias)
 
 
 def pair_atoms(columns: int, top: int, order: np.ndarray | None = None) -> np.ndarray:

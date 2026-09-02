@@ -157,7 +157,7 @@ The section above fixed the budget at 1,024 values and asked which head spends i
 | Sparse reference-class | 896 | 163 | 852 | 0.7090 | 0.6900 |
 | Sparse reference-class | **1,024** | 202 | 980 | 0.7246 | **0.7048** |
 
-Gating on validation, a sparse head first clears 65% at **640** stored values (64.35% test) and 70% at **896** (69.00% test); the smallest budgets whose *test* accuracy also clears the two targets are **768** (67.44%) and **1,024** (70.48%). A dense affine head needs 2,156 values to reach 66.40% and 2,860 to reach 70.51%, so element-wise sparsity is worth roughly a **2.8x parameter reduction** at both targets. Four later sections lower the sparse numbers again: an object-layout quota takes 65% to 640 values, a prune-and-regrow support search takes 65% to 512 and 70% to 896, generating the head from a fixed over-complete class dictionary takes 65% to 256 and 70% to 448, and adding a column dictionary of feature pairs takes 65% to 208 and 70% to 320. This is the opposite of the EuroSAT finding, where element-wise sparsity was about 0.8 points *worse* than feature selection at equal budget; with 45 classes instead of 10 the head dominates the budget, and letting each class pick its own columns is the only way to read a wide pool cheaply.
+Gating on validation, a sparse head first clears 65% at **640** stored values (64.35% test) and 70% at **896** (69.00% test); the smallest budgets whose *test* accuracy also clears the two targets are **768** (67.44%) and **1,024** (70.48%). A dense affine head needs 2,156 values to reach 66.40% and 2,860 to reach 70.51%, so element-wise sparsity is worth roughly a **2.8x parameter reduction** at both targets. Four later sections lower the sparse numbers again: an object-layout quota takes 65% to 640 values, a prune-and-regrow support search takes 65% to 512 and 70% to 896, generating the head from a fixed over-complete class dictionary takes 65% to 256 and 70% to 448, adding a column dictionary of feature pairs takes 65% to 208 and 70% to 320, and dropping the 44 free intercepts takes 70% to 304. This is the opposite of the EuroSAT finding, where element-wise sparsity was about 0.8 points *worse* than feature selection at equal budget; with 45 classes instead of 10 the head dominates the budget, and letting each class pick its own columns is the only way to read a wide pool cheaply.
 
 The 1,024-value row improves on the 70.02% reported in the previous section for two reasons. Once the support is fixed the problem is convex again, so the pruned mask is **refit by LBFGS at a validation-selected `C`** (`refit_masked_ref_logreg_gpu`) instead of being read off the pruning optimiser; iterative magnitude pruning finds a better support than a convex solver does, but a convex solver then places better weights on it. The candidate list is also selected on validation rather than fixed, and 256 columns wins over 192 at this budget.
 
@@ -307,7 +307,7 @@ Which candidate list wins depends on the budget, and the crossover is informativ
 | **896** | top 512 | 353 | 0.7378 | **0.7162** |
 | 1,024 | top 512 | 383 | 0.7467 | **0.7290** |
 
-Three frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 640 to **512 stored values** (65.71%); the smallest that clears **70%** falls from 1,024 to **896** (71.62%), with validation already clearing 70% at 640; and the 1,024-value operating point improves from 71.67% to **72.90% test**, which is 2.4 points above what a *dense* head reaches with 2,860 values. Against the dense frontier, element-wise sparsity is now worth a 4.2x parameter reduction at 65% (512 against 2,156) and a 3.2x reduction at 70% (896 against 2,860). Both numbers are superseded further below: dropping the element-wise restriction itself, by coding the same head in an over-complete class dictionary, takes 65% to 256 stored values and 70% to 448, and coding it in a dictionary of column pairs as well takes them to 208 and 320.
+Three frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 640 to **512 stored values** (65.71%); the smallest that clears **70%** falls from 1,024 to **896** (71.62%), with validation already clearing 70% at 640; and the 1,024-value operating point improves from 71.67% to **72.90% test**, which is 2.4 points above what a *dense* head reaches with 2,860 values. Against the dense frontier, element-wise sparsity is now worth a 4.2x parameter reduction at 65% (512 against 2,156) and a 3.2x reduction at 70% (896 against 2,860). Both numbers are superseded further below: dropping the element-wise restriction itself, by coding the same head in an over-complete class dictionary, takes 65% to 256 stored values and 70% to 448, coding it in a dictionary of column pairs as well takes them to 208 and 320, and refusing to store a free intercept takes 70% to 304.
 
 The one cost is breadth of feature extraction rather than stored values. A prune-only head at 1,024 values reads 207 pool columns; the regrown head reads 383, and the whole-pool arm reads 621. The stored-value count and the index pattern are unchanged -- one column id per stored weight either way -- but more of the 2,084-column pool has to be computed at inference time. Where extraction cost matters more than parameter count, the top-256 regrown arm is the compromise: 0.7214 test at 1,024 values from 228 columns, still 0.5 points above the prune-only head on a list half as wide. The section after next pushes that trade much further: measured against the whole-pool arm, restricting the pool to the top 128 ranked columns costs 1.75 points at 1,024 values and cuts extraction from 635 columns to 114, a 5.6x reduction.
 
@@ -786,6 +786,219 @@ Results are written to `experiments/resisc45_feature_dict_result.csv` (about
 paired-bootstrap intervals, the frontier and the equal-bits comparison from the
 existing CSV.
 
+The `+ 44` in this section's parameter count -- 21% of the budget at the
+208-value operating point -- is examined in the next section, which finds it
+almost entirely wasted.
+
+## The intercept was 21% of the budget
+
+Every RESISC45 head above has been budgeted as `nnz(P) + 44`: the sparse code
+plus one free intercept per non-reference class.  That was a rounding error
+when the budget was 1,024 stored values.  It is not one at the frontier the
+section above reached -- at **208** values, 44 of them are intercept and only
+164 are left to spell the weights, and at 96 values the intercept is 46% of
+everything the model stores.
+
+An intercept is a weight on a constant column, so nothing forces it to be free.
+`experiments/resisc45_coded_bias.py` appends a constant column to the
+standardised features and a matching identity atom to `Df`, which makes the
+head a bias-free `Dc @ P @ Df.T` over `k + 1` columns: the prune-and-regrow
+search then *decides* how many stored values an intercept is worth, against
+every other entry it could grow instead.  The parameterisation is nested --
+spending 44 values reproduces a free intercept exactly whenever `Dc` carries
+the class singletons -- so it can only lose by search.  Three intercept rules
+are compared at equal total stored values, everything else held at the previous
+section's settings:
+
+* `free` -- the incumbent, `nnz + 44` values;
+* `coded` -- the intercept drawn from the same sparse code, `nnz` values;
+* `none` -- no intercept in the standardised head at all, `nnz` values.
+
+The `free` arms reproduce the previous section's numbers exactly (0.4887 at 96,
+0.5578 at 128, 0.6505 at 208, 0.7010 at 320, 0.7403 at 512), and a re-run of
+`resisc45_feature_dict.py` at 96 values reproduces all six of its arms to four
+decimals, so the comparison below is like for like.
+
+**Test accuracy at equal stored values, by intercept rule.**
+
+| Parameters | `free` pairs256 | `free` pairs181 | `coded` pairs256 | `coded` pairs181 | `none` pairs256 |
+|---:|---:|---:|---:|---:|---:|
+| 96 | 0.4887 | 0.4681 | **0.5641** | 0.5549 | **0.5641** |
+| 112 | 0.5168 | 0.5203 | **0.5827** | 0.5798 | **0.5827** |
+| 128 | 0.5594 | 0.5578 | 0.5946 | **0.6048** | 0.5946 |
+| 144 | 0.5897 | 0.5789 | 0.6202 | 0.6141 | **0.6271** |
+| 160 | 0.6079 | 0.6030 | 0.6290 | **0.6357** | 0.6287 |
+| 176 | 0.6222 | 0.6119 | **0.6449** | 0.6387 | 0.6405 |
+| 192 | 0.6360 | 0.6348 | 0.6463 | 0.6454 | **0.6465** |
+| 208 | 0.6583 | 0.6505 | 0.6606 | 0.6567 | **0.6625** |
+| 256 | 0.6790 | 0.6757 | 0.6863 | 0.6713 | **0.6886** |
+| 320 | 0.7010 | 0.7021 | 0.7016 | 0.7032 | **0.7089** |
+| 512 | 0.7403 | 0.7373 | 0.7370 | 0.7362 | **0.7417** |
+| 1,024 | 0.7579 | 0.7556 | 0.7590 | 0.7543 | **0.7616** |
+
+**The gain is large exactly where the head is starved and gone by 192 values.**
+Paired bootstrap of the validation-selected `coded`/`none` arm against the
+`free` incumbent at the same total stored values: **+6.6** points [+5.4, +7.8]
+at 96, +6.3 [+5.1, +7.6] at 112, +4.5 [+3.4, +5.7] at 128, +3.8 [+2.6, +4.9]
+at 144, +2.1 [+1.0, +3.2] at 160 and +2.3 [+1.2, +3.4] at 176 -- every interval
+excluding zero -- then +1.0 [-0.1, +2.2] at 192 and +0.2 [-0.8, +1.3] at 208.
+From 224 to 1,024 every interval straddles zero but one, +1.2 [+0.3, +2.1] at
+448.  This is the same shape as the two sections above: the parameterisation
+lever is worth a great deal while the head is starved and nothing once it is
+not.
+
+**The control is the whole story: the intercept is not worth buying cheaply,
+it is worth not buying at all.** The `none` arm, which cannot spend anything on
+an intercept, is indistinguishable from the `coded` one: over the 21 budgets it
+wins 12, loses 6 and ties exactly 3, and no difference exceeds 1.2 points.  The
+three exact ties are the tell -- at 96, 112 and 128 values the `coded` search
+chose *zero* entries on the constant column, so the two arms fitted the same
+support.  The `coded` search agrees everywhere else too: it puts **0 to 3** of
+its stored values on the constant column at every budget up to 384 -- one at
+the 208-value operating point -- and 2 to 10 from 448 to 1,024, where values
+are cheap.  Given 16,384 class atoms times 65,792 column atoms to grow into,
+the search wants about one stored value's worth of intercept, not 44.
+
+The reason is the standardiser fold, and it is worth stating plainly because it
+is what makes the accounting honest.  A deployed head is `w_eff = W / sigma`
+and `b_eff = b - sum_j W_j mu_j / sigma_j`, so a head with `b = 0` in the
+standardised space still has a *non-zero* deployed intercept -- the one implied
+by centring the features at the training mean.  RESISC45's splits are exactly
+class-balanced, so there is no prior to encode either, and 44 free values buy
+almost nothing on top of the intercept the fold already supplies.  Nothing about
+the accounting convention changes: both heads reconstruct `w_eff` and `b_eff`
+from the stored code, the two fixed dictionaries and the same training
+standardiser, and the coded head simply stores 44 fewer numbers to do it.
+
+The effect is not an artefact of the pair dictionary.  With `Df = I` -- the
+class-dictionary head of two sections ago, no pairs at all -- dropping the free
+intercept is worth +4.2 points at 160 stored values (0.6156 against 0.5737).
+Nor does making the nesting exact help: prepending the 44 class singletons to
+the class dictionary, so that 44 code values could reproduce the free intercept
+exactly, reads 0.6302 at 160 and 0.6743 at 256 against 0.6290 and 0.6863 for
+the plain Gaussian dictionary -- the same conclusion the class-dictionary
+section reached about designed atoms.
+
+**The frontier.** Validation selects the arm at each budget; test is read once.
+
+| Parameters | Selected arm | Columns read | Deployed weights | Index bits | Validation | Test |
+|---:|---|---:|---:|---:|---:|---:|
+| 96 | `coded` pairs181 | 105 | 4,620 | 2,785 | 0.5757 | 0.5549 |
+| 112 | `coded` pairs181 | 109 | 4,796 | 3,250 | 0.6075 | 0.5798 |
+| 128 | `coded` pairs181 | 119 | 5,236 | 3,714 | 0.6294 | 0.6048 |
+| 144 | `none` pairs256 | 152 | 6,688 | 4,321 | 0.6410 | 0.6271 |
+| 160 | `coded` pairs256 | 159 | 6,996 | 4,801 | 0.6589 | 0.6290 |
+| 176 | `coded` pairs256 | 168 | 7,392 | 5,281 | 0.6652 | 0.6449 |
+| 192 | `coded` pairs256 | 176 | 7,744 | 5,761 | 0.6710 | 0.6463 |
+| **208** | `coded` pairs256 | 188 | 8,272 | 6,241 | 0.6808 | **0.6606** |
+| 224 | `none` pairs256 | 189 | 8,316 | 6,721 | 0.6957 | 0.6713 |
+| 240 | `free` pairs256 | 181 | 7,964 | 5,881 | 0.6992 | 0.6717 |
+| 256 | `free` pairs256 | 181 | 7,964 | 6,361 | 0.7094 | 0.6790 |
+| 272 | `none` pairs256 | 199 | 8,756 | 8,162 | 0.7141 | 0.6887 |
+| 288 | `none` pairs256 | 214 | 9,416 | 8,642 | 0.7205 | 0.6994 |
+| **304** | `coded` pairs256 | 215 | 9,460 | 9,122 | 0.7213 | **0.7038** |
+| 320 | `free` pairs256 | 211 | 9,284 | 8,282 | 0.7260 | 0.7010 |
+| 384 | `free` pairs256 | 228 | 10,032 | 10,202 | 0.7387 | 0.7243 |
+| 448 | `free` pairs256 | 246 | 10,824 | 12,122 | 0.7563 | 0.7271 |
+| 512 | `free` pairs256 | 256 | 11,264 | 14,043 | 0.7597 | 0.7403 |
+| 640 | `free` pairs181 | 274 | 12,056 | 17,292 | 0.7695 | 0.7497 |
+| 768 | `free` pairs256 | 306 | 13,464 | 21,724 | 0.7762 | 0.7551 |
+| 1,024 | `free` pairs181 | 342 | 15,048 | 28,434 | 0.7830 | 0.7556 |
+
+**65%** is still first cleared at **208 stored values**, but at 66.06% rather
+than the 65.05% of the section above, and the 176- and 192-value rows close
+most of the remaining gap (64.49% and 64.63% against 62.22% and 63.60%).
+**70%** falls from 320 to **304 stored values** (70.38%).  Against a dense
+affine head's 2,156 and 2,860 values that is a **10.4x** and **9.4x** parameter
+reduction.  The honest summary of this section is therefore that it is worth
+one point of accuracy at the 65% budget and one budget step at the 70% one; the
+much larger numbers are all below 192 values, where the model is not clearing
+either target.
+
+Reproduce with:
+
+```bash
+python experiments/resisc45_coded_bias.py
+```
+
+Results are written to `experiments/resisc45_coded_bias_result.csv` (about
+30 GPU-minutes for the 21-budget grid); `resisc45_coded_bias.py --summarise`
+re-prints the intercept comparison, the paired-bootstrap intervals, the stored
+values each coded arm spends on the constant column, and the frontier from the
+existing CSV.
+
+## Distillation buys nothing at these budgets
+
+Every RESISC45 improvement in this file so far changed the head's
+*parameterisation*.  Distillation is the obvious lever that changes neither the
+head nor the pool: a teacher is a training-time object, so a student that
+learns more from soft targets than from hard labels is accuracy for zero stored
+values.  The budgeted head is starved -- 65% test against a 79.4% pool ceiling
+-- which is the regime a teacher is supposed to help most, and with 45 classes
+soft targets carry confusion structure the one-hot labels do not.
+
+`experiments/resisc45_distill.py` fits the previous section's student with
+
+```
+(1 - alpha) * CE(hard) + alpha * T^2 * KL(teacher_T || student_T)
+```
+
+in *both* the prune-and-regrow search -- the loss it descends and the regrow
+criterion, which is the same gradient -- and the convex refit, which stays
+convex because a cross-entropy against a fixed target distribution is.  Four
+teachers separate the possible mechanisms: the full-pool logistic teacher's own
+train logits (`insample`, 95.0% train / 79.4% test), the same teacher 5-fold
+cross-fitted so its train targets are honestly uncertain (`xfit`, 79.7% train),
+a teacher fitted on the student's own 512 candidate columns (`candidate`, the
+control for "the teacher sees columns the student cannot" -- and, at 79.8%
+test, actually the *better* teacher of the two), and a *uniform* teacher at
+`T = 1`, which is exactly label smoothing at `eps = alpha`.
+
+**Not one arm helps.** Test accuracy against the hard-label head at the same
+budget, with paired-bootstrap intervals:
+
+| Arm | 208 values | 256 values |
+|---|---:|---:|
+| hard labels | 0.6583 | 0.6790 |
+| `insample` T=1 a=0.5 | 0.6495 (-0.9 [-1.9, +0.2]) | 0.6752 (-0.4 [-1.4, +0.6]) |
+| `insample` T=1 a=0.9 | 0.6441 (-1.4 [-2.5, -0.3]) | 0.6832 (+0.4 [-0.6, +1.3]) |
+| `insample` T=2 a=0.5 | 0.6435 (-1.5 [-2.6, -0.4]) | 0.6741 (-0.5 [-1.5, +0.5]) |
+| `insample` T=4 a=0.5 | 0.6211 (-3.7 [-4.8, -2.6]) | 0.6486 (-3.1 [-4.2, -1.9]) |
+| `xfit` T=1 a=0.5 | 0.6473 (-1.1 [-2.1, -0.1]) | 0.6703 (-0.9 [-1.9, +0.1]) |
+| `xfit` T=2 a=0.5 | 0.6440 (-1.4 [-2.5, -0.4]) | 0.6568 (-2.2 [-3.2, -1.2]) |
+| `candidate` T=2 a=0.5 | 0.6449 (-1.3 [-2.4, -0.2]) | 0.6725 (-0.7 [-1.7, +0.3]) |
+| `smooth` eps=0.1 | 0.6479 (-1.0 [-2.0, +0.1]) | 0.6789 (-0.0 [-1.0, +1.0]) |
+| `smooth` eps=0.3 | 0.6346 (-2.4 [-3.4, -1.3]) | 0.6500 (-2.9 [-4.0, -1.8]) |
+
+Of the 32 distilled arms exactly one is above its control (`insample` T=1
+a=0.9 at 256 values, +0.4 points with an interval spanning zero), validation
+picks a losing arm at 208 and the hard-label arm at 256, and the loss grows
+monotonically with temperature for every teacher at both budgets.
+Cross-fitting the teacher,
+which is the standard fix for a teacher that is too confident on its own
+training set, makes the result slightly *worse* rather than better, and label
+smoothing -- the control for "any softening regularises" -- is neutral at
+`eps = 0.1` and clearly negative at `eps = 0.3`.
+
+The reading that fits all four arms is that this student is not
+capacity-limited in the way a small network is.  It is a *linear* head on the
+teacher's own features, sharing the teacher's hypothesis class and differing
+only in how many values it may store; softening the targets adds no information
+it can express and removes gradient signal on the hard decisions its few
+weights have to get right.  This is the same conclusion the EuroSAT
+convolutional-distillation row in the negative-results table reached from the
+opposite direction, where the student's *representation* was the bottleneck.
+
+Reproduce with:
+
+```bash
+python experiments/resisc45_distill.py
+```
+
+Results are written to `experiments/resisc45_distill_result.csv` (about
+15 GPU-minutes); `resisc45_distill.py --summarise` re-prints the comparison
+from the existing CSV.
+
 ## Image-statistics baseline
 
 The baseline computes four statistics independently for each band:
@@ -868,6 +1081,9 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | Wide column atoms for the RESISC45 dictionary head | Widening the alphabet on the *column* axis only pays at width 2: 16,896 random atoms of width 4, 8 and 32 read 0.6560/0.6429/0.6417 test at 256 stored values and 16,896 dense random directions read 0.6557, against 0.6519 for the raw columns and 0.6790 for enumerated pairs; unlike the class axis, atom count alone buys nothing here, because a class's column pattern is sparse and a wide atom charges it for columns it does not want |
 | Larger pair enumerations for the RESISC45 column dictionary | Enumerating every signed pair of the top 320 ranked columns (102,592 atoms) is no better than the top 256 at 256 stored values (0.6765 against 0.6790) and 0.9-1.1 points worse at 512 and 1,024, where the atom count starts to overfit 18,900 training images |
 | Semantically chosen class groups for the RESISC45 dictionary head | Ward class groups from the pool or from the dense head's own rows beat size-matched random groups by 0.9 points at 256 stored values and by 0.03 at 1,024; the atom count is worth several times more than the atom content, and a random draw is as good as a designed one |
+| Distillation into the budgeted RESISC45 head | A 79.4%-test full-pool logistic teacher, cross-fitted or not, plus a candidate-list teacher and label smoothing as controls, all lose: 31 of 32 distilled arms fall below the hard-label head at 208 and 256 stored values, by up to 5.8 points, and the loss grows monotonically with temperature. A linear student in the teacher's own hypothesis class gains nothing from softened targets and loses gradient signal on the decisions its few weights must get right |
+| A free intercept for the RESISC45 dictionary head | The 44 intercepts are worth 0 to 3 stored values, not 44: a head with no intercept in the standardised space matches or beats a coded one at every budget, because the standardiser fold already supplies `b_eff = -sum_j W_j mu_j / sigma_j` and the splits are class-balanced. Above 192 stored values the saving is inside the split's resolution, so it only matters where the head is starved |
+| Class singletons in the RESISC45 class dictionary | Prepending the 44 identity atoms to the Gaussian class dictionary, which makes a coded intercept able to reproduce a free one exactly, reads 0.6302 at 160 stored values and 0.6743 at 256 against 0.6290 and 0.6863 without them -- the same verdict on designed atoms the class-dictionary section reached |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
 
@@ -898,8 +1114,10 @@ python experiments/resisc45_quadratic.py
 python experiments/resisc45_support_probe.py
 python experiments/resisc45_class_dict.py
 python experiments/resisc45_feature_dict.py
+python experiments/resisc45_coded_bias.py
+python experiments/resisc45_distill.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, the support-search probe writes `experiments/resisc45_support_probe_result.csv`, the class-dictionary head writes `experiments/resisc45_class_dict_result.csv`, and the column-dictionary head writes `experiments/resisc45_feature_dict_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, the support-search probe writes `experiments/resisc45_support_probe_result.csv`, the class-dictionary head writes `experiments/resisc45_class_dict_result.csv`, the column-dictionary head writes `experiments/resisc45_feature_dict_result.csv`, the intercept comparison writes `experiments/resisc45_coded_bias_result.csv`, and the distillation comparison writes `experiments/resisc45_distill_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
