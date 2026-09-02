@@ -556,3 +556,112 @@ def refit_masked_ref_logreg_gpu(
 def block_sparse_params(per_group_k: int, n_classes: int = NUM_CLASSES) -> int:
     """Stored values of a block-sparse reference-class head."""
     return (n_classes - 1) * (per_group_k + 1)
+
+
+def fit_rigl_ref_logreg_gpu(
+    x: np.ndarray,
+    y: np.ndarray,
+    nonzeros: int,
+    weight_decay: float = 1e-4,
+    epochs: int = 1500,
+    updates: int = 30,
+    drop_fraction: float = 0.3,
+    stop_fraction: float = 0.75,
+    lr: float = 0.03,
+    device: str = 'cuda',
+    ref: int = 0,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Reference-class head whose support is searched by prune-and-regrow.
+
+    ``fit_sparse_logreg_gpu`` can only ever *remove* weights, so every column it
+    might use has to be in the candidate list chosen up front by a group-lasso
+    ranking -- and that ranking scores each column against the label, never
+    against the columns already selected.  Rigged lotteries (RigL) keep the
+    active-weight count fixed at ``nonzeros`` throughout and periodically drop
+    the smallest active weights and regrow the same number of *inactive* entries
+    with the largest dense loss gradient.  The growth criterion is evaluated at
+    the current fit, so a column is grown only if it explains error the already
+    active columns leave behind, and the candidate list can be the whole pool.
+
+    Returns:
+        ``(w_eff [K, k], b_eff [K])`` acting on the raw features, with at most
+        ``nonzeros`` nonzero entries outside the zero reference row.
+    """
+    torch.manual_seed(seed)
+    mu, sigma = standardise(x)
+    xs = _to_device((x - mu) / sigma, device)
+    yt = _to_device(y, device, torch.long)
+    n, k = xs.shape
+    n_classes = int(y.max()) + 1
+    rows = n_classes - 1
+    if nonzeros >= rows * k:
+        raise ValueError('nonzeros must be smaller than the dense head')
+    onehot = torch.nn.functional.one_hot(yt, n_classes).float()[:, 1:]
+
+    def dense_grad(w: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Gradient of the mean cross-entropy w.r.t. every weight, active or not."""
+        rest = xs @ w.T + b
+        logits = torch.cat((torch.zeros_like(rest[:, :1]), rest), dim=1)
+        resid = torch.softmax(logits, dim=1)[:, 1:] - onehot
+        return resid.T @ xs / n
+
+    w = torch.zeros(rows, k, device=device)
+    b = torch.zeros(rows, device=device)
+    # Seeding the support with the largest gradients at w=0 is the first regrow
+    # step: at the uniform-logit initialisation this is the class-residual
+    # correlation of each column, which is a strictly better start than random.
+    flat = dense_grad(w, b).abs().reshape(-1)
+    mask = torch.zeros(rows * k, device=device)
+    mask[torch.topk(flat, nonzeros).indices] = 1.0
+    mask = mask.reshape(rows, k)
+    w = w.requires_grad_(True)
+    b = b.requires_grad_(True)
+
+    opt = torch.optim.Adam([w, b], lr=lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+    stop_at = int(epochs * stop_fraction)
+    every = max(1, stop_at // max(1, updates))
+    for epoch in range(epochs):
+        opt.zero_grad(set_to_none=True)
+        rest = xs @ (w * mask).T + b
+        logits = torch.cat((torch.zeros_like(rest[:, :1]), rest), dim=1)
+        loss = torch.nn.functional.cross_entropy(logits, yt)
+        loss = loss + weight_decay * ((w * mask) ** 2).sum()
+        loss.backward()
+        opt.step()
+        sched.step()
+        if epoch >= stop_at or (epoch + 1) % every or epoch == 0:
+            continue
+        # Cosine-decayed exploration: swap many weights early, few near the end.
+        frac = 0.5 * drop_fraction * (1.0 + np.cos(np.pi * epoch / stop_at))
+        swap = int(frac * nonzeros)
+        if swap < 1:
+            continue
+        with torch.no_grad():
+            active = mask.reshape(-1) > 0
+            score = torch.where(active, (w * mask).abs().reshape(-1),
+                                torch.full_like(active, float('inf'), dtype=w.dtype))
+            drop = torch.topk(score, swap, largest=False).indices
+            kept = active.clone()
+            kept[drop] = False
+            grad = dense_grad((w * mask).detach(), b.detach()).abs().reshape(-1)
+            grad[active] = -1.0  # only entries that were inactive can be grown
+            grow = torch.topk(grad, swap).indices
+            flat_w = w.reshape(-1)
+            flat_w[drop] = 0.0
+            flat_w[grow] = 0.0
+            new_mask = kept.float()
+            new_mask[grow] = 1.0
+            mask = new_mask.reshape(rows, k)
+            for state_key in ('exp_avg', 'exp_avg_sq'):
+                state = opt.state[w].get(state_key)
+                if state is not None:  # grown weights restart without momentum
+                    flat_state = state.reshape(-1)
+                    flat_state[drop] = 0.0
+                    flat_state[grow] = 0.0
+    w_np = (w * mask).detach().double().cpu().numpy()
+    b_np = b.detach().double().cpu().numpy()
+    w_full = np.insert(w_np, ref, 0.0, axis=0)
+    b_full = np.insert(b_np, ref, 0.0)
+    return w_full / sigma[None, :], b_full - (w_full * (mu / sigma)[None, :]).sum(1)

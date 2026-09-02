@@ -157,7 +157,7 @@ The section above fixed the budget at 1,024 values and asked which head spends i
 | Sparse reference-class | 896 | 163 | 852 | 0.7090 | 0.6900 |
 | Sparse reference-class | **1,024** | 202 | 980 | 0.7246 | **0.7048** |
 
-Gating on validation, a sparse head first clears 65% at **640** stored values (64.35% test) and 70% at **896** (69.00% test); the smallest budgets whose *test* accuracy also clears the two targets are **768** (67.44%) and **1,024** (70.48%). A dense affine head needs 2,156 values to reach 66.40% and 2,860 to reach 70.51%, so element-wise sparsity is worth roughly a **2.8x parameter reduction** at both targets. This is the opposite of the EuroSAT finding, where element-wise sparsity was about 0.8 points *worse* than feature selection at equal budget; with 45 classes instead of 10 the head dominates the budget, and letting each class pick its own columns is the only way to read a wide pool cheaply.
+Gating on validation, a sparse head first clears 65% at **640** stored values (64.35% test) and 70% at **896** (69.00% test); the smallest budgets whose *test* accuracy also clears the two targets are **768** (67.44%) and **1,024** (70.48%). A dense affine head needs 2,156 values to reach 66.40% and 2,860 to reach 70.51%, so element-wise sparsity is worth roughly a **2.8x parameter reduction** at both targets. Two later sections lower the sparse numbers again without touching the head's form: an object-layout quota takes 65% to 640 values, and a prune-and-regrow support search takes 65% to 512 and 70% to 896. This is the opposite of the EuroSAT finding, where element-wise sparsity was about 0.8 points *worse* than feature selection at equal budget; with 45 classes instead of 10 the head dominates the budget, and letting each class pick its own columns is the only way to read a wide pool cheaply.
 
 The 1,024-value row improves on the 70.02% reported in the previous section for two reasons. Once the support is fixed the problem is convex again, so the pruned mask is **refit by LBFGS at a validation-selected `C`** (`refit_masked_ref_logreg_gpu`) instead of being read off the pruning optimiser; iterative magnitude pruning finds a better support than a convex solver does, but a convex solver then places better weights on it. The candidate list is also selected on validation rather than fixed, and 256 columns wins over 192 at this budget.
 
@@ -248,7 +248,7 @@ Per class the intended effect is clearly present and clearly paid for. At 1,024 
 
 (the `q` columns are test accuracy at that quota; the last three columns are the validation-selected operating point. This experiment fixes the candidate list at 256 columns, so the `q=0` column is not identical to the frontier table above, which also swept the candidate-list size.)
 
-Two frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 768 to **640 stored values** (65.54%), and the 1,024-value operating point improves from 70.48% to **71.67% test**. 70% still needs the full 1,024 values on test, although validation already clears it at 768. About a fifth of the columns the budgeted head ends up reading are layout columns (44 of 207 at 1,024 values).
+Two frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 768 to **640 stored values** (65.54%), and the 1,024-value operating point improves from 70.48% to **71.67% test**. 70% still needs the full 1,024 values on test, although validation already clears it at 768. The next section moves both again by a margin this one cannot reach, and it does so by changing how the support is searched rather than what is in the pool. About a fifth of the columns the budgeted head ends up reading are layout columns (44 of 207 at 1,024 values).
 
 **How much of that is the quota and how much is the family?** Widening a candidate list at all is worth something, so the same experiment runs a control that gives the same 64 displaced slots to the *next* 64 base columns by group-lasso rank instead of to layout columns.
 
@@ -272,6 +272,52 @@ python experiments/resisc45_layout_frontier.py
 ```
 
 Results are written to `experiments/resisc45_layout_gain_result.csv` (with per-class deltas in `experiments/resisc45_layout_gain_classes.csv`), `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`. `resisc45_layout_frontier.py --summarise` re-prints the frontier summary from the existing CSV.
+
+## Prune-and-regrow finds a much better support than prune-only
+
+Every sparse head above chooses its support with `fit_sparse_logreg_gpu`, iterative magnitude pruning, which can only ever *remove* weights. A column the pruner drops early is gone for good, so the whole result depends on the candidate list handed to it up front -- and that list comes from an L2,1 group-lasso ranking that scores each column against the label and never against the columns already chosen. The quota of the previous section is a hand-tuned patch over exactly that weakness.
+
+`fit_rigl_ref_logreg_gpu` removes the need for the patch. Following RigL, it holds the active-weight count at the budget for the whole run and periodically **drops the smallest active weights and regrows the same number of inactive entries with the largest dense loss gradient**, with the swapped fraction decayed on a cosine from its peak to zero over the first three quarters of training. The growth criterion is evaluated at the current fit, so an entry is grown only if it explains error the already-active weights leave behind: redundancy is scored where it actually matters, and the candidate list can be the entire pool. The support is refit convexly afterwards exactly as before.
+
+`experiments/resisc45_rigl.py` crosses the two search methods with two quota candidate lists and adds a no-candidate-list arm, all on the merged 2,084-column pool. Search settings and `C` are chosen on validation; test is read once per cell.
+
+| Parameters | Prune-only, top 256 | Prune-only, top 512 | Prune-and-regrow, top 256 | Prune-and-regrow, top 512 | Prune-and-regrow, whole pool |
+|---:|---:|---:|---:|---:|---:|
+| 256 | 0.4740 | 0.4948 | 0.5513 | 0.5521 | **0.5710** |
+| 384 | 0.5729 | 0.5597 | 0.6116 | 0.6092 | **0.6259** |
+| 512 | 0.6290 | 0.6227 | **0.6624** | 0.6571 | 0.6476 |
+| 640 | 0.6554 | 0.6583 | 0.6810 | 0.6813 | **0.6881** |
+| 768 | 0.6794 | 0.6779 | 0.6948 | 0.6978 | **0.6983** |
+| 896 | 0.6967 | 0.7019 | 0.7146 | **0.7162** | 0.7049 |
+| 1,024 | 0.7167 | 0.7190 | 0.7214 | **0.7290** | 0.7205 |
+
+(each cell is test accuracy at the validation-best search setting for that arm; the first column is the previous best protocol.)
+
+**Regrowth beats pruning at every budget, and by far the most at small ones.** Holding the candidate list fixed, it gains +7.7 test points on the 256-column list and +5.7 on the 512-column list at 256 stored values, falling to +0.5 and +1.0 at 1,024; comparing each method's validation-selected arm instead gives +7.6 points at 256 values, +5.3 at 384, +2.8 at 512, and +1.0 at 1,024. This is the largest single improvement found for RESISC45 since element-wise sparsity itself, and it is purely a search-procedure change -- same pool, same head, same parameter accounting, same convex refit. Widening the candidate list without changing the search does almost nothing by comparison (prune-only gains 2.1 points at 256 values and loses accuracy at 384, 512, and 768), which is the control that separates the two explanations: the gain is the ability to *reconsider*, not the wider list.
+
+Which candidate list wins depends on the budget, and the crossover is informative. Below 512 values the head has so few weights that the ranked list is the binding constraint and the whole 2,084-column pool wins outright; above 640 values a wider list starts to cost more in support overfitting than it returns, and the 512-column quota list wins. The whole-pool arm never collapses, though: it stays within 1.5 points of the best arm at every budget, so **the group-lasso candidate list, the quota, and the hand-tuning behind them are no longer load-bearing.**
+
+| Parameters | Selected arm | Columns read | Validation | Test |
+|---:|---|---:|---:|---:|
+| 256 | whole pool | 176 | 0.5917 | 0.5710 |
+| 384 | whole pool | 269 | 0.6419 | 0.6259 |
+| **512** | top 512 | 255 | 0.6810 | **0.6571** |
+| 640 | whole pool | 415 | 0.7043 | 0.6881 |
+| 768 | top 512 | 342 | 0.7229 | 0.6978 |
+| **896** | top 512 | 353 | 0.7378 | **0.7162** |
+| 1,024 | top 512 | 383 | 0.7467 | **0.7290** |
+
+Three frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 640 to **512 stored values** (65.71%); the smallest that clears **70%** falls from 1,024 to **896** (71.62%), with validation already clearing 70% at 640; and the 1,024-value operating point improves from 71.67% to **72.90% test**, which is 2.4 points above what a *dense* head reaches with 2,860 values. Against the dense frontier, element-wise sparsity is now worth a 4.2x parameter reduction at 65% (512 against 2,156) and a 3.2x reduction at 70% (896 against 2,860).
+
+The one cost is breadth of feature extraction rather than stored values. A prune-only head at 1,024 values reads 207 pool columns; the regrown head reads 383, and the whole-pool arm reads 621. The stored-value count and the index pattern are unchanged -- one column id per stored weight either way -- but more of the 2,084-column pool has to be computed at inference time. Where extraction cost matters more than parameter count, the top-256 regrown arm is the compromise: 0.7214 test at 1,024 values from 228 columns, still 0.5 points above the prune-only head on a list half as wide.
+
+Reproduce with:
+
+```bash
+python experiments/resisc45_rigl.py
+```
+
+Results are written to `experiments/resisc45_rigl_result.csv`; `resisc45_rigl.py --summarise` re-prints the comparison from the existing CSV.
 
 ## Image-statistics baseline
 
@@ -347,6 +393,7 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | RGB-only models | Remove the NIR/SWIR information that separates vegetation, crops, water, and built surfaces without reducing linear-head cost |
 | MOSAIKS/random convolutional features | Can reach 95%+, but needs roughly 4,617 head parameters at the 95% floor, about 17× submission 13 |
 | Merging a new RESISC45 feature family into one group-lasso ranking | The 505-column object-layout pool wins 113 of the merged top 256 slots and lowers validation accuracy at every budget; it only pays when capped at a reserved quota of candidate slots |
+| Iterative magnitude pruning as the support search for a sparse RESISC45 head | Prune-only cannot recover a column it drops, so it depends on a candidate list ranked against the label alone; prune-and-regrow beats it at every budget, by 7.6 points of test accuracy at 256 stored values and 1.0 at 1,024 |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
 
@@ -372,8 +419,9 @@ python experiments/resisc45_gpu_features3.py
 python experiments/resisc45_layout_gain.py
 python experiments/resisc45_layout_diagnose.py
 python experiments/resisc45_layout_frontier.py
+python experiments/resisc45_rigl.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, and the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
