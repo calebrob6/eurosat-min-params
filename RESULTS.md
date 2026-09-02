@@ -88,21 +88,56 @@ The strongest coordinate-only MLP reaches 66.03% test accuracy with 7,753 learne
 
 The 33-feature handcrafted approach was adapted for a preliminary RESISC45 trial. RESISC45 contains 31,500 RGB images across 45 scene classes with TorchGeo's fixed 18,900/6,300/6,300 train/validation/test split. Images are resized bilinearly from 256×256 to 64×64 before fixed feature extraction.
 
-Because RESISC45 has only RGB channels, the Sentinel-2 feature set cannot be transferred literally. The adapted 147-feature zero-parameter pool preserves the same concepts: per-channel distributions, multiscale gradients, structure-tensor coherence, orientation distributions, Fourier texture, RGB cross-channel correlation, fine and coarse texture of excess-green/color-contrast/saturation/lightness maps, and global Hough-line, Harris-corner, LBP, connected-component, radial-spectrum, and region-shape summaries. Train-only L1 coefficient ranking selects exactly 33 features from this pool. Validation selects `C=3000` for the folded reference-class multinomial logistic regression.
+Because RESISC45 has only RGB channels, the Sentinel-2 feature set cannot be transferred literally. The adapted 147-feature zero-parameter pool preserves the same concepts: per-channel distributions, multiscale gradients, structure-tensor coherence, orientation distributions, Fourier texture, RGB cross-channel correlation, fine and coarse texture of excess-green/color-contrast/saturation/lightness maps, and global Hough-line, Harris-corner, LBP, connected-component, radial-spectrum, and region-shape summaries. Train-only L1 coefficient ranking selects exactly 33 features from this pool.
 
-With 45 classes, the 33-feature head stores `(45 - 1) × (33 + 1) = 1,496` learned parameters. The selected full-training model reaches **61.57% validation accuracy and 58.87% test accuracy**.
+A normalization audit confirmed that all 33 selected columns are standardized from training statistics to approximately zero mean and unit variance, with no constant features. The apparent preference for `C=3000` came from choosing the exact maximum on a flat validation plateau: `C=30` scores 61.27%, while `C=3000` scores 61.57%, a difference of 19 correct predictions among 6,300 validation images. Applying the repository's one-standard-error heuristic selects `C=30` as the smallest tested value within one standard error of the maximum.
+
+With 45 classes, the 33-feature head stores `(45 - 1) × (33 + 1) = 1,496` learned parameters. The selected full-training model reaches **61.27% validation accuracy and 59.06% test accuracy**.
 
 | Training fraction | Images | Seed | RESISC45 test accuracy |
 |---:|---:|---:|---:|
-| 1% | 189 | 0 | 0.2789 |
-| 2% | 378 | 0 | 0.3130 |
-| 5% | 945 | 0 | 0.4000 |
-| 10% | 1,890 | 0 | 0.4795 |
-| 20% | 3,780 | 0 | 0.5351 |
-| 50% | 9,450 | 0 | 0.5724 |
-| 100% | 18,900 | 0 | **0.5887** |
+| 1% | 189 | 0 | 0.2892 |
+| 2% | 378 | 0 | 0.3443 |
+| 5% | 945 | 0 | 0.4516 |
+| 10% | 1,890 | 0 | 0.5024 |
+| 20% | 3,780 | 0 | 0.5425 |
+| 50% | 9,450 | 0 | 0.5700 |
+| 100% | 18,900 | 0 | **0.5906** |
 
 This is an initial transfer rather than a RESISC45-optimized frontier. The feature subset is selected once using the full training split, and the full-data validation-selected `C` is then held fixed for every fraction. The lower fractions use one stratified subsample seed as requested. The result shows that the fixed spatial-statistics approach transfers beyond EuroSAT, but RESISC45's 45 fine-grained RGB classes require substantially more discrimination than 33 global summary features provide.
+
+## RESISC45 under a 1,024-parameter budget
+
+The preliminary transfer above spends 1,496 parameters for 59.06% test accuracy. A follow-up experiment asks a harder question: what is the best RESISC45 test accuracy obtainable with at most **1,024 stored values**? With 45 classes a dense reference-class affine head costs `44 x (k + 1)`, so a conventional head can afford only 22 features. Two things change that.
+
+**A larger, higher-resolution zero-parameter pool.** The original 147 columns were extracted from a bilinear 64x64 resize. `experiments/resisc45_cache_full.py` caches the native 256x256 images, and two GPU extractors add 1,432 further deterministic columns: `resisc45_gpu_features.py` (colour moments, fixed HSV/vegetation bin occupancies, multiscale gradient texture, structure-tensor coherence and orientation histograms, Haar subband energies, Fourier ring and sorted-wedge power, direction-averaged co-occurrence, box-counting lacunarity, coarse layout contrasts) and `resisc45_gpu_features2.py` (log-Gabor amplitude statistics, rotation-invariant uniform LBP histograms, normalised-autocorrelation periodicity, projection-profile regularity, percentile-thresholded morphology). The 1,579-column pool with an unconstrained 69,520-parameter head reaches **79.78% test accuracy**, against 70.71% for the original 147-column pool.
+
+**Head structures that spend the budget differently.** Three families were compared at the same 1,024-value budget, all fitted on train with the operating point chosen on validation.
+
+| Head | Features read | Parameters | Validation | Test |
+|---|---:|---:|---:|---:|
+| Dense affine, top-22 features | 22 | 1,012 | 0.5832 | 0.5700 |
+| Dense one-hidden-layer ReLU, width 10 | 53 | 1,024 | 0.6303 | 0.6092 |
+| Sparse reference-class head over the top 64 features | 63 | 1,024 | 0.6771 | 0.6579 |
+| Sparse reference-class head over the top 128 features | 122 | 1,024 | 0.7116 | 0.6975 |
+| Sparse reference-class head over the top 192 features | 171 | 1,024 | **0.7197** | **0.7002** |
+| Sparse rank-16 projection over the whole pool | 211 | 1,024 | 0.6954 | 0.6751 |
+| Sparse reference-class head over the whole pool | 516 | 1,024 | 0.7071 | 0.7016 |
+
+The dense structured heads are a real improvement over the preliminary transfer: 60.92% test with 1,024 values beats 59.06% with 1,496. The larger jump comes from sparsity. A rank-*r* head fitted on the *whole* pool needs surprisingly little rank -- rank 8 over the 1,207 columns available before the oriented/periodic pool was added already reaches 66.43% -- so the binding constraint is the dense `k x r` projection, not the rank. Pruning that projection, or pruning the affine head directly, lets each class or each compound feature read its own subset of the pool.
+
+**Parameter-accounting caveat.** The sparse rows count only their nonzero values, exactly as the project counts only learned values elsewhere, and the nonzero pattern is treated the same way as the feature-selection indices that every other result in this file already leaves uncounted. The pattern is nonetheless much larger here: 980 (class, feature) index pairs rather than a single 22-to-33 element feature list, so the sparse rows are not directly comparable to the dense EuroSAT frontier numbers. The dense rows in the table are the strictly conservative reading.
+
+Reproduce the whole comparison with:
+
+```bash
+python experiments/resisc45_cache_full.py
+python experiments/resisc45_gpu_features.py
+python experiments/resisc45_gpu_features2.py
+python experiments/resisc45_min_params.py
+```
+
+Results are written to `experiments/resisc45_min_params_result.csv`, and the pool columns used by the whole-pool sparse head are saved to `experiments/resisc45_sparse_pool_columns.npy`.
 
 ## Image-statistics baseline
 

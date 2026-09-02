@@ -542,7 +542,7 @@ def main() -> None:
     ranking = l1_rank(train_features, train_labels)
     selected = ranking[:SELECTED_FEATURES]
     selected_names = [names[index] for index in selected]
-    best: tuple[float, float] | None = None
+    validation_results: list[tuple[float, float]] = []
     for regularization in args.Cs:
         w, b, feature_idx = fit_folded_logreg(
             train_features,
@@ -554,11 +554,24 @@ def main() -> None:
             val_labels, predict(val_features, w, b, feature_idx)
         )
         print(f'C={regularization:g} validation={val_accuracy:.4f}', flush=True)
-        if best is None or val_accuracy > best[0]:
-            best = (val_accuracy, regularization)
-    if best is None:
+        validation_results.append((regularization, val_accuracy))
+    if not validation_results:
         raise ValueError('C grid is empty')
-    selection_val_accuracy, selected_c = best
+    max_val_accuracy = max(accuracy for _, accuracy in validation_results)
+    standard_error = np.sqrt(
+        max_val_accuracy * (1 - max_val_accuracy) / len(val_labels)
+    )
+    one_se_threshold = max_val_accuracy - standard_error
+    selected_c, selection_val_accuracy = min(
+        (regularization, accuracy)
+        for regularization, accuracy in validation_results
+        if accuracy >= one_se_threshold
+    )
+    print(
+        f'one-SE threshold={one_se_threshold:.4f}; selected C={selected_c:g} '
+        f'validation={selection_val_accuracy:.4f}',
+        flush=True,
+    )
 
     test_features, test_labels, test_names = load_feature_pool(
         'test', args.batch_size, args.workers
@@ -601,7 +614,10 @@ def main() -> None:
             'classes': NUM_CLASSES,
             'learned_parameters': REFERENCE_CLASS_PARAMETERS,
             'regularization_C': selected_c,
+            'C_selection': 'smallest C within one standard error of best validation',
             'C_selection_validation_accuracy': f'{selection_val_accuracy:.6f}',
+            'max_C_sweep_validation_accuracy': f'{max_val_accuracy:.6f}',
+            'one_standard_error_threshold': f'{one_se_threshold:.6f}',
             'resize': 'bilinear 256x256 to 64x64',
             'train_fraction_percent': fraction,
             'n_train': len(indices),
