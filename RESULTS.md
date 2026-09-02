@@ -139,6 +139,78 @@ python experiments/resisc45_min_params.py
 
 Results are written to `experiments/resisc45_min_params_result.csv`, and the pool columns used by the whole-pool sparse head are saved to `experiments/resisc45_sparse_pool_columns.npy`.
 
+## Minimum parameters for 65% and 70% on RESISC45
+
+The section above fixed the budget at 1,024 values and asked which head spends it best. `experiments/resisc45_param_frontier.py` fixes the *targets* instead and walks the budget down over the same 1,579-column pool. Candidate-list size, group-lasso strength, and `C` are chosen on validation; test is read once per row.
+
+| Head | Parameters | Features read | Index pattern | Validation | Test |
+|---|---:|---:|---:|---:|---:|
+| Dense affine | 1,012 | 22 | 22 | 0.5587 | 0.5416 |
+| Dense affine | 1,452 | 32 | 32 | 0.6149 | 0.5965 |
+| Dense affine | 2,156 | 48 | 48 | 0.6708 | 0.6640 |
+| Dense affine | 2,860 | 64 | 64 | 0.7175 | 0.7051 |
+| Dense affine | 5,676 | 128 | 128 | 0.7868 | 0.7670 |
+| Sparse reference-class | 384 | 126 | 340 | 0.5797 | 0.5686 |
+| Sparse reference-class | 512 | 156 | 468 | 0.6287 | 0.6059 |
+| Sparse reference-class | 640 | 88 | 596 | 0.6651 | 0.6435 |
+| Sparse reference-class | **768** | 159 | 724 | 0.6881 | **0.6744** |
+| Sparse reference-class | 896 | 163 | 852 | 0.7090 | 0.6900 |
+| Sparse reference-class | **1,024** | 202 | 980 | 0.7246 | **0.7048** |
+
+Gating on validation, a sparse head first clears 65% at **640** stored values (64.35% test) and 70% at **896** (69.00% test); the smallest budgets whose *test* accuracy also clears the two targets are **768** (67.44%) and **1,024** (70.48%). A dense affine head needs 2,156 values to reach 66.40% and 2,860 to reach 70.51%, so element-wise sparsity is worth roughly a **2.8x parameter reduction** at both targets. This is the opposite of the EuroSAT finding, where element-wise sparsity was about 0.8 points *worse* than feature selection at equal budget; with 45 classes instead of 10 the head dominates the budget, and letting each class pick its own columns is the only way to read a wide pool cheaply.
+
+The 1,024-value row improves on the 70.02% reported in the previous section for two reasons. Once the support is fixed the problem is convex again, so the pruned mask is **refit by LBFGS at a validation-selected `C`** (`refit_masked_ref_logreg_gpu`) instead of being read off the pruning optimiser; iterative magnitude pruning finds a better support than a convex solver does, but a convex solver then places better weights on it. The candidate list is also selected on validation rather than fixed, and 256 columns wins over 192 at this budget.
+
+**How much of the gain survives a compact index pattern?** A sparse head needs one column id per stored weight, which is a much larger deployment artefact than the single feature list every dense result in this file carries. `fit_block_sparse_logreg_gpu` interpolates: the 44 rows are clustered into `g` groups that share one feature list of 22 columns each, so the stored values stay at 1,012 while the pattern shrinks to `22g` ids plus 44 group labels (the labels are vacuous at `g=1`, whose real pattern is the 22 ids alone).
+
+| Shared feature lists | Parameters | Features read | Index pattern | Validation | Test |
+|---:|---:|---:|---:|---:|---:|
+| 1 (ordinary feature selection) | 1,012 | 22 | 66 | 0.5549 | 0.5540 |
+| 4 | 1,012 | 41 | 132 | 0.5973 | 0.5852 |
+| 8 | 1,012 | 67 | 220 | 0.5967 | 0.5762 |
+| 11 | 1,012 | 80 | 286 | 0.6357 | 0.6244 |
+| 22 | 1,012 | 121 | 396 | 0.6367 | 0.6024 |
+| 44 (one list per class) | 1,012 | 181 | 1,012 | 0.6983 | 0.6683 |
+
+Sharing does not recover the sparse result: eight shared lists reach 57.62% test and twenty-two reach 60.24%, against 70.48% for the unstructured head at the same 1,012-1,024 values. Even one list per class, which already costs a full-size index pattern, only reaches 66.83%, because it forces every class to spend exactly 22 weights. The accuracy therefore comes from per-class freedom over *both* which columns and how many, not merely from a wider union of columns. There is no cheap middle ground: the dense rows remain the strictly conservative reading.
+
+## Where the RESISC45 budget is lost
+
+`experiments/resisc45_failure_analysis.py` compares the unconstrained 69,520-value head (79.78% test, what the pool can express) with the 1,024-value sparse head (70.43% test in that run) class by class, which separates pool failures from budget failures.
+
+Classes the pool itself cannot separate, with the class each is most often confused for:
+
+| Class | Ceiling accuracy | Budget accuracy | Top confusion |
+|---|---:|---:|---|
+| palace | 0.500 | 0.293 | church |
+| basketball_court | 0.575 | 0.515 | tennis_court |
+| tennis_court | 0.576 | 0.528 | medium_residential |
+| railway_station | 0.649 | 0.435 | railway |
+| church | 0.650 | 0.448 | palace |
+| roundabout | 0.679 | 0.530 | intersection |
+
+Classes the pool handles but the budget cannot afford:
+
+| Class | Ceiling accuracy | Budget accuracy | Loss | Top confusion |
+|---|---:|---:|---:|---|
+| railway_station | 0.649 | 0.435 | 0.214 | railway |
+| bridge | 0.850 | 0.643 | 0.207 | river |
+| ship | 0.837 | 0.652 | 0.185 | harbor |
+| railway | 0.829 | 0.650 | 0.179 | railway_station |
+| river | 0.817 | 0.640 | 0.176 | wetland |
+| commercial_area | 0.779 | 0.607 | 0.171 | palace |
+
+Both lists are dominated by pairs that differ in *object layout* rather than in texture or colour statistics: a bridge is a river plus one elongated crossing structure, a harbour is water plus repeated docked hulls, a railway station is a railway plus platforms and buildings, and a palace is a church-like facade with different massing. The pool's 171 selected columns are correspondingly texture-heavy - 35 rotation-invariant LBP columns, 13 Fourier-ring columns, 10 multiscale gradient coefficients of variation - and contain nothing that counts or measures discrete elongated objects. Elongated-structure and repeated-object descriptors are therefore the highest-value additions to the pool, and they would help at every budget rather than only at the top.
+
+Reproduce both experiments with:
+
+```bash
+python experiments/resisc45_param_frontier.py
+python experiments/resisc45_failure_analysis.py
+```
+
+Results are written to `experiments/resisc45_param_frontier_result.csv` and `experiments/resisc45_failure_analysis_result.csv`.
+
 ## Image-statistics baseline
 
 The baseline computes four statistics independently for each band:
@@ -231,6 +303,8 @@ python experiments/eval_training_fractions.py --download-spatial-splits
 python experiments/eval_imagestats_fractions.py --download-spatial-splits
 python experiments/coordinate_mlp.py
 python experiments/resisc45_33_feature.py --download
+python experiments/resisc45_param_frontier.py
+python experiments/resisc45_failure_analysis.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```

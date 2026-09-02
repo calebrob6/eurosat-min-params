@@ -389,3 +389,170 @@ def fit_sparse_logreg_gpu(
 def sparse_logreg_params(nonzeros: int, n_classes: int = NUM_CLASSES) -> int:
     """Stored values of a sparse reference-class affine head."""
     return nonzeros + (n_classes - 1)
+
+
+def _fit_masked_ref_logreg(
+    xs: torch.Tensor,
+    yt: torch.Tensor,
+    mask: torch.Tensor | None,
+    C: float,
+    steps: int,
+    n_classes: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Convex reference-class logistic regression on a *fixed* support mask.
+
+    The reference row is class 0 and is held at zero, so the stored rows are
+    ``mask.sum()`` weights plus ``n_classes - 1`` biases.  With the support
+    fixed the problem is convex, so LBFGS reaches the same optimum every time.
+    """
+    n, k = xs.shape
+    w = torch.zeros(n_classes - 1, k, device=xs.device, requires_grad=True)
+    b = torch.zeros(n_classes - 1, device=xs.device, requires_grad=True)
+    l2 = 1.0 / (2.0 * C * n)
+    opt = torch.optim.LBFGS([w, b], max_iter=steps, history_size=20,
+                            tolerance_grad=1e-9, tolerance_change=1e-12,
+                            line_search_fn='strong_wolfe')
+
+    def closure():
+        opt.zero_grad(set_to_none=True)
+        wm = w if mask is None else w * mask
+        rest = xs @ wm.T + b
+        logits = torch.cat((torch.zeros_like(rest[:, :1]), rest), dim=1)
+        loss = torch.nn.functional.cross_entropy(logits, yt) + l2 * (wm * wm).sum()
+        loss.backward()
+        return loss
+
+    opt.step(closure)
+    with torch.no_grad():
+        wm = w.detach() if mask is None else w.detach() * mask
+    return wm, b.detach()
+
+
+def _fold_ref(w: torch.Tensor, b: torch.Tensor, mu, sigma, ref: int = 0):
+    """Insert the zero reference row and fold the standardiser into the head."""
+    w_np = w.double().cpu().numpy()
+    b_np = b.double().cpu().numpy()
+    w_full = np.insert(w_np, ref, 0.0, axis=0)
+    b_full = np.insert(b_np, ref, 0.0)
+    return w_full / sigma[None, :], b_full - (w_full * (mu / sigma)[None, :]).sum(1)
+
+
+def _support_clusters(
+    profile: np.ndarray, n_groups: int, per_group_k: int, iters: int = 25, seed: int = 0
+) -> np.ndarray:
+    """Partition rows so that each group is well covered by one shared support.
+
+    ``profile`` holds one unit-norm nonnegative row per non-reference class
+    describing how strongly that class uses each pool column.  The objective is
+    the total retained energy ``sum_c sum_{f in S_g(c)} profile[c, f]^2`` where
+    each group's support ``S_g`` is its own top-``per_group_k`` columns; the
+    alternating updates below are the k-means algorithm for that objective.
+    """
+    rows, k = profile.shape
+    if n_groups >= rows:
+        return np.arange(rows)
+    rng = np.random.default_rng(seed)
+    energy = profile ** 2
+    centres = [int(rng.integers(rows))]
+    for _ in range(n_groups - 1):  # k-means++ seeding under cosine distance
+        sim = energy @ energy[centres].T
+        d = 1.0 - sim.max(1)
+        d = np.clip(d, 0.0, None)
+        if d.sum() <= 0:
+            centres.append(int(rng.integers(rows)))
+        else:
+            centres.append(int(rng.choice(rows, p=d / d.sum())))
+    groups = np.argmax(energy @ energy[centres].T, axis=1)
+    for _ in range(iters):
+        supports = np.zeros((n_groups, k), dtype=bool)
+        for g in range(n_groups):
+            members = energy[groups == g]
+            score = members.sum(0) if len(members) else energy.sum(0)
+            supports[g, np.argpartition(-score, per_group_k - 1)[:per_group_k]] = True
+        retained = energy @ supports.T.astype(np.float64)
+        new_groups = retained.argmax(1)
+        for g in range(n_groups):  # keep every group nonempty
+            if not (new_groups == g).any():
+                new_groups[int(retained[:, g].argmax())] = g
+        if (new_groups == groups).all():
+            break
+        groups = new_groups
+    return groups
+
+
+def _block_mask(w: torch.Tensor, groups: np.ndarray, keep: int, n_groups: int) -> torch.Tensor:
+    """Keep each group's top-``keep`` columns, scored by its members' energy."""
+    rows, k = w.shape
+    mask = torch.zeros(rows, k, device=w.device)
+    energy = (w / w.norm(dim=1, keepdim=True).clamp_min(1e-12)) ** 2
+    gt = torch.as_tensor(groups, device=w.device)
+    for g in range(n_groups):
+        member = torch.nonzero(gt == g, as_tuple=True)[0]
+        if member.numel() == 0:
+            continue
+        idx = torch.topk(energy[member].sum(0), min(keep, k)).indices
+        mask[member[:, None], idx[None, :]] = 1.0
+    return mask
+
+
+def fit_block_sparse_logreg_gpu(
+    x: np.ndarray,
+    y: np.ndarray,
+    n_groups: int,
+    per_group_k: int,
+    C: float = 10.0,
+    steps: int = 300,
+    rounds: int = 6,
+    device: str = 'cuda',
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Reference-class head whose 44 rows share only ``n_groups`` feature lists.
+
+    A fully unstructured sparse head needs one ``(class, column)`` index per
+    stored weight, which is a far larger deployment artefact than the single
+    feature list every dense result in this project carries.  Restricting the
+    support to ``n_groups`` shared lists of ``per_group_k`` columns keeps the
+    stored-value count at ``44 * (per_group_k + 1)`` while shrinking the index
+    pattern to ``n_groups * per_group_k`` column ids plus 44 group labels.
+    ``n_groups=1`` is ordinary feature selection and ``n_groups=44`` is the
+    unstructured head with an equal per-class allocation.
+
+    Returns:
+        ``(w_eff [K, k], b_eff [K], groups [K-1], mask [K-1, k])``.
+    """
+    mu, sigma = standardise(x)
+    xs = _to_device((x - mu) / sigma, device)
+    yt = _to_device(y, device, torch.long)
+    k = xs.shape[1]
+    n_classes = int(y.max()) + 1
+    w, b = _fit_masked_ref_logreg(xs, yt, None, C, steps, n_classes)
+    profile = (w / w.norm(dim=1, keepdim=True).clamp_min(1e-12)).abs().double().cpu().numpy()
+    groups = _support_clusters(profile, n_groups, per_group_k, seed=seed)
+    mask = None
+    for keep in np.geomspace(k, per_group_k, rounds + 1)[1:]:
+        mask = _block_mask(w, groups, int(round(keep)), n_groups)
+        w, b = _fit_masked_ref_logreg(xs, yt, mask, C, steps, n_classes)
+    w_eff, b_eff = _fold_ref(w, b, mu, sigma)
+    return w_eff, b_eff, groups, mask.cpu().numpy()
+
+
+def refit_masked_ref_logreg_gpu(
+    x: np.ndarray,
+    y: np.ndarray,
+    mask: np.ndarray,
+    C: float = 10.0,
+    steps: int = 300,
+    device: str = 'cuda',
+) -> tuple[np.ndarray, np.ndarray]:
+    """Refit a reference-class head on a fixed support mask at a given ``C``."""
+    mu, sigma = standardise(x)
+    xs = _to_device((x - mu) / sigma, device)
+    yt = _to_device(y, device, torch.long)
+    mt = _to_device(mask, device)
+    w, b = _fit_masked_ref_logreg(xs, yt, mt, C, steps, int(y.max()) + 1)
+    return _fold_ref(w, b, mu, sigma)
+
+
+def block_sparse_params(per_group_k: int, n_classes: int = NUM_CLASSES) -> int:
+    """Stored values of a block-sparse reference-class head."""
+    return (n_classes - 1) * (per_group_k + 1)
