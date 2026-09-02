@@ -839,3 +839,257 @@ def refit_masked_dict_ref_logreg_gpu(
 def dict_logreg_params(nonzeros: int, n_classes: int = NUM_CLASSES) -> int:
     """Stored values of a dictionary-coded sparse reference-class head."""
     return nonzeros + (n_classes - 1)
+
+
+def feature_atoms(
+    columns: int, count: int, width: int, seed: int = 0, identity: bool = True
+) -> np.ndarray:
+    """Fixed unit-norm dictionary of *column* directions, one per atom.
+
+    ``unit_atoms`` and ``gaussian_atoms`` widen the alphabet a stored value may
+    spell a *class* pattern with; this widens the alphabet it may spell a
+    *column* pattern with, so one value can buy a whole direction in feature
+    space.  Each generated atom is a signed combination of ``width`` randomly
+    chosen standardised columns scaled to unit L2 norm (``width == columns``
+    gives a dense Gaussian direction instead), and the ``columns`` identity
+    atoms are prepended when ``identity`` is set, so the dictionary contains the
+    raw-column parameterisation exactly and can only lose by search.
+    """
+    rng = np.random.default_rng(seed)
+    blocks = []
+    if identity:
+        blocks.append(np.eye(columns, dtype=np.float64))
+    if count > 0:
+        if width >= columns:
+            atoms = rng.standard_normal((columns, count))
+        else:
+            atoms = np.zeros((columns, count))
+            rows = np.argsort(rng.random((count, columns)), axis=1)[:, :width]
+            signs = rng.choice((-1.0, 1.0), size=(count, width))
+            atoms[rows, np.arange(count)[:, None]] = signs
+        blocks.append(atoms / np.linalg.norm(atoms, axis=0, keepdims=True))
+    return np.concatenate(blocks, axis=1)
+
+
+def _sep_dense_grad(dc: torch.Tensor, df: torch.Tensor,
+                    grad_w: torch.Tensor) -> torch.Tensor:
+    """Push ``dL/dW`` into every ``(class atom, column atom)`` code entry.
+
+    Forming ``(Dc.T @ dL/dW) @ Df`` costs a ``catoms x fatoms`` allocation, so
+    the search only pays for it at a mask update, never in an epoch.
+    """
+    return dc.T @ (grad_w @ df)
+
+
+class _SparseCode:
+    """Support-indexed sparse code with its own Adam state.
+
+    ``fit_rigl_dict_ref_logreg_gpu`` carries the code as a dense ``atoms x k``
+    tensor, which is affordable while ``k`` is the pool width but not once the
+    columns are themselves an over-complete dictionary: ``16,384 x 8,192``
+    entries is 0.5 GiB per optimiser tensor and a dense matmul per epoch for a
+    code with a thousand nonzeros.  Here only the ``nnz`` live values are
+    stored, so an epoch costs ``nnz`` rank-1 updates and the dense gradient is
+    formed only at the ~100 mask updates that actually need it.
+    """
+
+    def __init__(self, index: torch.Tensor, lr: float):
+        self.index = index
+        self.value = torch.zeros(len(index), device=index.device)
+        self.avg = torch.zeros_like(self.value)
+        self.avg_sq = torch.zeros_like(self.value)
+        self.step_count = 0
+        self.lr = lr
+
+    def reindex(self, keep: torch.Tensor, grow: torch.Tensor) -> None:
+        """Drop ``~keep`` positions and append ``grow`` entries with fresh state."""
+        zeros = torch.zeros(len(grow), device=self.index.device)
+        self.index = torch.cat((self.index[keep], grow))
+        self.value = torch.cat((self.value[keep], zeros))
+        self.avg = torch.cat((self.avg[keep], zeros))
+        self.avg_sq = torch.cat((self.avg_sq[keep], zeros))
+
+    def adam(self, grad: torch.Tensor, lr: float, b1: float = 0.9, b2: float = 0.999,
+             eps: float = 1e-8) -> None:
+        self.step_count += 1
+        self.avg.mul_(b1).add_(grad, alpha=1 - b1)
+        self.avg_sq.mul_(b2).addcmul_(grad, grad, value=1 - b2)
+        bias1 = 1 - b1 ** self.step_count
+        bias2 = 1 - b2 ** self.step_count
+        self.value.addcdiv_(self.avg / bias1, (self.avg_sq / bias2).sqrt().add_(eps),
+                            value=-lr)
+
+
+def fit_rigl_sep_dict_ref_logreg_gpu(
+    x: np.ndarray,
+    y: np.ndarray,
+    class_dict: np.ndarray,
+    feat_dict: np.ndarray,
+    nonzeros: int,
+    weight_decay: float = 1e-4,
+    epochs: int = 4000,
+    updates: int = 100,
+    drop_fraction: float = 0.5,
+    stop_fraction: float = 0.75,
+    lr: float = 0.03,
+    device: str = 'cuda',
+    ref: int = 0,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Prune-and-regrow head whose weights are ``Dc @ P @ Df.T`` with ``P`` sparse.
+
+    ``fit_rigl_dict_ref_logreg_gpu`` buys a class pattern per stored value but
+    still spends that value on one *column*.  Here both axes are dictionaries:
+    ``Dc [44, catoms]`` of unit-norm class directions and ``Df [k, fatoms]`` of
+    unit-norm column directions, so one stored value buys the rank-1 outer
+    product ``Dc[:, a] Df[:, f].T``.  With ``Df`` the identity the
+    parameterisation is exactly the class-dictionary head, and with both
+    identity it is the element-wise head, so neither control can lose by
+    expressiveness.
+
+    Returns:
+        ``(w_eff [K, k], b_eff [K], support [nnz])`` -- the folded head acting
+        on raw features plus the flat ``catoms * fatoms`` support indices, which
+        ``refit_masked_sep_dict_ref_logreg_gpu`` needs to refit convexly.
+    """
+    torch.manual_seed(seed)
+    mu, sigma = standardise(x)
+    xs = _to_device((x - mu) / sigma, device)
+    yt = _to_device(y, device, torch.long)
+    dc = _to_device(class_dict, device)
+    df = _to_device(feat_dict, device)
+    n, k = xs.shape
+    n_classes = int(y.max()) + 1
+    rows = n_classes - 1
+    catoms, fatoms = dc.shape[1], df.shape[1]
+    if dc.shape[0] != rows:
+        raise ValueError('class dictionary must have one row per non-reference class')
+    if df.shape[0] != k:
+        raise ValueError('feature dictionary must have one row per column')
+    if nonzeros >= catoms * fatoms:
+        raise ValueError('nonzeros must be smaller than the dense code')
+    onehot = torch.nn.functional.one_hot(yt, n_classes).float()[:, 1:]
+
+    def residual(w: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """``dL/dW`` at the given head, i.e. the gradient w.r.t. every weight."""
+        logits = torch.cat((torch.zeros(n, 1, device=device), xs @ w.T + b), dim=1)
+        resid = torch.softmax(logits, dim=1)[:, 1:] - onehot
+        return (resid.T @ xs) / n
+
+    b = torch.zeros(rows, device=device, requires_grad=True)
+    with torch.no_grad():
+        start = _sep_dense_grad(dc, df, residual(torch.zeros(rows, k, device=device),
+                                                 b.detach())).abs().reshape(-1)
+        code = _SparseCode(torch.topk(start, nonzeros).indices, lr)
+        del start
+    b_avg = torch.zeros_like(b.detach())
+    b_avg_sq = torch.zeros_like(b.detach())
+    stop_at = int(epochs * stop_fraction)
+    every = max(1, stop_at // max(1, updates))
+
+    def gathers():
+        return dc[:, code.index // fatoms], df[:, code.index % fatoms]
+
+    dc_sel, df_sel = gathers()
+    for epoch in range(epochs):
+        step_lr = lr * 0.5 * (1.0 + np.cos(np.pi * epoch / epochs))
+        value = code.value.detach().requires_grad_(True)
+        w = (dc_sel * value) @ df_sel.T
+        logits = torch.cat((torch.zeros(n, 1, device=device), xs @ w.T + b), dim=1)
+        loss = torch.nn.functional.cross_entropy(logits, yt)
+        loss = loss + weight_decay * (value * value).sum()
+        grad_v, grad_b = torch.autograd.grad(loss, (value, b))
+        with torch.no_grad():
+            code.adam(grad_v, step_lr)
+            b_avg.mul_(0.9).add_(grad_b, alpha=0.1)
+            b_avg_sq.mul_(0.999).addcmul_(grad_b, grad_b, value=0.001)
+            bias1 = 1 - 0.9 ** (epoch + 1)
+            bias2 = 1 - 0.999 ** (epoch + 1)
+            b -= step_lr * (b_avg / bias1) / ((b_avg_sq / bias2).sqrt() + 1e-8)
+        if epoch >= stop_at or (epoch + 1) % every or epoch == 0:
+            continue
+        frac = 0.5 * drop_fraction * (1.0 + np.cos(np.pi * epoch / stop_at))
+        swap = int(frac * nonzeros)
+        if swap < 1:
+            continue
+        with torch.no_grad():
+            drop = torch.topk(code.value.abs(), swap, largest=False).indices
+            keep = torch.ones(len(code.index), dtype=torch.bool, device=device)
+            keep[drop] = False
+            w = (dc_sel * code.value) @ df_sel.T
+            grad = _sep_dense_grad(dc, df, residual(w, b.detach())).abs().reshape(-1)
+            grad[code.index] = -1.0
+            grow = torch.topk(grad, swap).indices
+            del grad
+            code.reindex(keep, grow)
+            dc_sel, df_sel = gathers()
+    with torch.no_grad():
+        w = (dc_sel * code.value) @ df_sel.T
+    w_eff, b_eff = _fold_ref(w.detach(), b.detach(), mu, sigma)
+    return w_eff, b_eff, code.index.cpu().numpy()
+
+
+def refit_masked_sep_dict_ref_logreg_gpu(
+    x: np.ndarray,
+    y: np.ndarray,
+    class_dict: np.ndarray,
+    feat_dict: np.ndarray,
+    support: np.ndarray,
+    C: float = 10.0,
+    steps: int = 300,
+    device: str = 'cuda',
+) -> tuple[np.ndarray, np.ndarray]:
+    """Refit a fixed separable-code support convexly, as the other heads do."""
+    mu, sigma = standardise(x)
+    xs = _to_device((x - mu) / sigma, device)
+    yt = _to_device(y, device, torch.long)
+    dc = _to_device(class_dict, device)
+    df = _to_device(feat_dict, device)
+    n = xs.shape[0]
+    n_classes = int(y.max()) + 1
+    fatoms = df.shape[1]
+    index = torch.as_tensor(support, device=device, dtype=torch.long)
+    dc_sel = dc[:, index // fatoms]
+    df_sel = df[:, index % fatoms]
+    value = torch.zeros(len(index), device=device, requires_grad=True)
+    b = torch.zeros(n_classes - 1, device=device, requires_grad=True)
+    l2 = 1.0 / (2.0 * C * n)
+    opt = torch.optim.LBFGS([value, b], max_iter=steps, history_size=20,
+                            tolerance_grad=1e-9, tolerance_change=1e-12,
+                            line_search_fn='strong_wolfe')
+
+    def closure():
+        opt.zero_grad(set_to_none=True)
+        w = (dc_sel * value) @ df_sel.T
+        logits = torch.cat((torch.zeros(n, 1, device=device), xs @ w.T + b), dim=1)
+        loss = torch.nn.functional.cross_entropy(logits, yt) + l2 * (value * value).sum()
+        loss.backward()
+        return loss
+
+    opt.step(closure)
+    with torch.no_grad():
+        w = (dc_sel * value.detach()) @ df_sel.T
+    return _fold_ref(w, b.detach(), mu, sigma)
+
+
+def pair_atoms(columns: int, top: int, order: np.ndarray | None = None) -> np.ndarray:
+    """Identity atoms plus every signed pair ``(x_i +- x_j)/sqrt(2)`` over ``top`` columns.
+
+    ``feature_atoms`` *samples* random sparse column directions; this enumerates
+    the width-2 ones exhaustively over the ``top`` highest-ranked columns, so
+    the support search can find the best available pair rather than the best
+    pair that happened to be drawn.  ``order`` gives the column ranking; the
+    first ``top`` of it are paired and the rest appear only as identity atoms.
+    """
+    rank = np.arange(columns) if order is None else np.asarray(order)
+    chosen = rank[:top]
+    left, right = np.triu_indices(top, k=1)
+    count = len(left)
+    atoms = np.zeros((columns, 2 * count))
+    scale = 1.0 / np.sqrt(2.0)
+    span = np.arange(count)
+    atoms[chosen[left], span] = scale
+    atoms[chosen[right], span] = scale
+    atoms[chosen[left], count + span] = scale
+    atoms[chosen[right], count + span] = -scale
+    return np.concatenate((np.eye(columns), atoms), axis=1)

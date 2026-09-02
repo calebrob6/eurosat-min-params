@@ -157,7 +157,7 @@ The section above fixed the budget at 1,024 values and asked which head spends i
 | Sparse reference-class | 896 | 163 | 852 | 0.7090 | 0.6900 |
 | Sparse reference-class | **1,024** | 202 | 980 | 0.7246 | **0.7048** |
 
-Gating on validation, a sparse head first clears 65% at **640** stored values (64.35% test) and 70% at **896** (69.00% test); the smallest budgets whose *test* accuracy also clears the two targets are **768** (67.44%) and **1,024** (70.48%). A dense affine head needs 2,156 values to reach 66.40% and 2,860 to reach 70.51%, so element-wise sparsity is worth roughly a **2.8x parameter reduction** at both targets. Three later sections lower the sparse numbers again: an object-layout quota takes 65% to 640 values, a prune-and-regrow support search takes 65% to 512 and 70% to 896, and generating the head from a fixed over-complete class dictionary takes 65% to 256 and 70% to 448. This is the opposite of the EuroSAT finding, where element-wise sparsity was about 0.8 points *worse* than feature selection at equal budget; with 45 classes instead of 10 the head dominates the budget, and letting each class pick its own columns is the only way to read a wide pool cheaply.
+Gating on validation, a sparse head first clears 65% at **640** stored values (64.35% test) and 70% at **896** (69.00% test); the smallest budgets whose *test* accuracy also clears the two targets are **768** (67.44%) and **1,024** (70.48%). A dense affine head needs 2,156 values to reach 66.40% and 2,860 to reach 70.51%, so element-wise sparsity is worth roughly a **2.8x parameter reduction** at both targets. Four later sections lower the sparse numbers again: an object-layout quota takes 65% to 640 values, a prune-and-regrow support search takes 65% to 512 and 70% to 896, generating the head from a fixed over-complete class dictionary takes 65% to 256 and 70% to 448, and adding a column dictionary of feature pairs takes 65% to 208 and 70% to 320. This is the opposite of the EuroSAT finding, where element-wise sparsity was about 0.8 points *worse* than feature selection at equal budget; with 45 classes instead of 10 the head dominates the budget, and letting each class pick its own columns is the only way to read a wide pool cheaply.
 
 The 1,024-value row improves on the 70.02% reported in the previous section for two reasons. Once the support is fixed the problem is convex again, so the pruned mask is **refit by LBFGS at a validation-selected `C`** (`refit_masked_ref_logreg_gpu`) instead of being read off the pruning optimiser; iterative magnitude pruning finds a better support than a convex solver does, but a convex solver then places better weights on it. The candidate list is also selected on validation rather than fixed, and 256 columns wins over 192 at this budget.
 
@@ -307,7 +307,7 @@ Which candidate list wins depends on the budget, and the crossover is informativ
 | **896** | top 512 | 353 | 0.7378 | **0.7162** |
 | 1,024 | top 512 | 383 | 0.7467 | **0.7290** |
 
-Three frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 640 to **512 stored values** (65.71%); the smallest that clears **70%** falls from 1,024 to **896** (71.62%), with validation already clearing 70% at 640; and the 1,024-value operating point improves from 71.67% to **72.90% test**, which is 2.4 points above what a *dense* head reaches with 2,860 values. Against the dense frontier, element-wise sparsity is now worth a 4.2x parameter reduction at 65% (512 against 2,156) and a 3.2x reduction at 70% (896 against 2,860). Both numbers are superseded further below: dropping the element-wise restriction itself, by coding the same head in an over-complete class dictionary, takes 65% to 256 stored values and 70% to 448.
+Three frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 640 to **512 stored values** (65.71%); the smallest that clears **70%** falls from 1,024 to **896** (71.62%), with validation already clearing 70% at 640; and the 1,024-value operating point improves from 71.67% to **72.90% test**, which is 2.4 points above what a *dense* head reaches with 2,860 values. Against the dense frontier, element-wise sparsity is now worth a 4.2x parameter reduction at 65% (512 against 2,156) and a 3.2x reduction at 70% (896 against 2,860). Both numbers are superseded further below: dropping the element-wise restriction itself, by coding the same head in an over-complete class dictionary, takes 65% to 256 stored values and 70% to 448, and coding it in a dictionary of column pairs as well takes them to 208 and 320.
 
 The one cost is breadth of feature extraction rather than stored values. A prune-only head at 1,024 values reads 207 pool columns; the regrown head reads 383, and the whole-pool arm reads 621. The stored-value count and the index pattern are unchanged -- one column id per stored weight either way -- but more of the 2,084-column pool has to be computed at inference time. Where extraction cost matters more than parameter count, the top-256 regrown arm is the compromise: 0.7214 test at 1,024 values from 228 columns, still 0.5 points above the prune-only head on a list half as wide. The section after next pushes that trade much further: measured against the whole-pool arm, restricting the pool to the top 128 ranked columns costs 1.75 points at 1,024 values and cuts extraction from 635 columns to 114, a 5.6x reduction.
 
@@ -597,7 +597,9 @@ stored values** (65.49%), and the smallest that clears **70%** falls from 896 to
 values, and it closes 44% of the gap between the previous 1,024-value head and
 the 79.37% ceiling of an unconstrained 91,740-value head on the same pool.
 Against the dense frontier, the head is now worth an 8.4x parameter reduction at
-65% (256 against 2,156) and a 6.4x reduction at 70% (448 against 2,860).
+65% (256 against 2,156) and a 6.4x reduction at 70% (448 against 2,860).  The
+next section applies the same idea to the *column* axis and takes the two
+budgets to 208 and 320.
 
 **What it costs.** Nothing in stored values or in feature extraction -- at 1,024
 values the dictionary head reads 400 pool columns against 383 for the
@@ -631,6 +633,158 @@ GPU-hours for the full grid); `resisc45_class_dict.py --summarise` re-prints the
 tables, the bootstrap intervals, and the equal-bits comparison from the existing
 CSV, and `--only-dicts` re-runs a single dictionary against its element-wise
 control.
+
+## A column dictionary too: what a stored value spends on the other axis
+
+The section above widened the alphabet a stored value may spell a *class*
+pattern with and halved the budget at both targets.  Its lesson was mechanical
+rather than semantic -- what paid was over-completeness, letting the support
+search *choose* a pattern per stored value instead of spelling one out class by
+class -- so the obvious question is whether the same trick works on the other
+axis, where each stored value still buys exactly one pool column.
+
+`experiments/resisc45_feature_dict.py` generates the head as `Dc @ P @ Df.T`:
+`Dc [44, catoms]` of unit-norm class directions, `Df [k, fatoms]` of unit-norm
+**column** directions, and `P` sparse.  One stored value buys the rank-1 outer
+product `Dc[:, a] Df[:, f].T` -- a class pattern times a column pattern.
+Stored values are `nnz(P) + 44` biases as before, both dictionaries are
+generated from a fixed seed by a stated rule, and both controls are nested:
+`Df = I` is exactly the class-dictionary head and `Dc = Df = I` is exactly the
+element-wise head.  Those two arms reproduce the previous section's numbers to
+four decimals wherever it reports them below 1,024 stored values, and to within
+0.2 points at 1,024, where the reassociated matmul changes the last few support
+entries.
+
+Carrying the code as `nnz` live values indexed into `catoms x fatoms` rather
+than as a dense `atoms x k` tensor is what makes the search affordable: a
+512-value fit with a 4,096-atom class dictionary that took 41 s in the
+class-dictionary code takes **2.5 s** here and returns a bit-identical support,
+because an epoch is now `nnz` rank-1 updates and the dense `catoms x fatoms`
+gradient is formed only at the ~100 mask updates that actually need it.  The
+old form computes `(xs @ P.T) @ Dc.T`, which is 158 GFLOP per epoch at 16,384
+atoms; forming `W = Dc @ P` first is about 200x fewer flops, and storing only
+the live entries removes the optimiser's 0.5 GiB of dense state as well.
+
+**Only width-2 atoms pay.**  All arms below use the same `gauss16384` class
+dictionary, the same 512-column candidate list and the same search settings, so
+they differ only in `Df`.  `pairsT` enumerates *every* signed pair
+`(x_i +- x_j)/sqrt2` over the `T` highest-ranked columns; `randWxN` samples `N`
+atoms of width `W` over all 512.
+
+| Column dictionary | Atoms | 256 values | 512 values | 1,024 values |
+|---|---:|---:|---:|---:|
+| `identity` (the class-dictionary head) | 512 | 0.6519 | 0.7216 | 0.7595 |
+| `pairs128`, all pairs of the top 128 columns | 16,768 | 0.6654 | 0.7397 | 0.7659 |
+| `pairs181` | 33,092 | 0.6757 | 0.7373 | 0.7556 |
+| `pairs256` | 65,792 | **0.6790** | 0.7403 | 0.7579 |
+| `pairs320` | 102,592 | 0.6765 | 0.7317 | 0.7471 |
+| `rand2x16384`, sampled pairs | 16,896 | 0.6681 | **0.7414** | 0.7587 |
+| `rand2x65536`, sampled pairs | 66,048 | 0.6711 | 0.7317 | 0.7559 |
+| `rand4x16384`, width 4 | 16,896 | 0.6560 | 0.7216 | 0.7584 |
+| `rand8x16384`, width 8 | 16,896 | 0.6429 | 0.7248 | 0.7475 |
+| `rand32x16384`, width 32 | 16,896 | 0.6417 | 0.7183 | 0.7511 |
+| `gaussF16384`, dense random directions | 16,896 | 0.6557 | 0.7279 | 0.7560 |
+| `graded`, pairs plus width-4 and width-8 atoms | 45,380 | 0.6798 | 0.7359 | 0.7575 |
+
+This is the opposite of the class-side result and it is the point of the
+section.  On the class axis *any* over-complete draw worked and the atom count
+was all that mattered; on the column axis the atom count buys nothing by itself
+-- 16,896 dense random directions are worth +0.4 points at 256 values
+[-0.8, +1.4] and 16,896 width-32 atoms are worth **-1.0** -- and what pays is
+specifically the **width-2** structure, +2.7 points at 256 values [+1.6, +3.8]
+by paired bootstrap over test images.  The width sweep 2 -> 4 -> 8 -> 32 ->
+dense at 256 values reads 0.6790, 0.6560, 0.6429, 0.6417, 0.6557 against
+0.6519 for the identity, so the effect is already gone at width 4 and is a
+*loss* by width 8.  The reason the two axes differ is that the head's class
+pattern for a column is dense -- every class needs some weight -- while its
+column pattern for a class is not, and a wide atom forces a class to pay for
+columns it does not want.  A pair atom is the smallest structure that is still
+a *choice*: it ties `|w_i| = |w_j|` and picks the relative sign, which is one
+stored value for two weights whenever a class wants a sum or a contrast of two
+features.
+
+Enumerating pairs beats sampling them, but only just: `pairs181` reads 0.6757
+at 256 values against 0.6681 for `rand2x16384` and 0.6711 for the four-times
+larger `rand2x65536`, so being able to reach the *best* pair among the
+top-ranked columns is worth about as much as quadrupling a random draw.  The
+enumeration saturates by about 256 columns -- `pairs320` is no better at 256
+values and clearly worse above 512, where 102,592 column atoms times 16,384
+class atoms start to overfit 18,900 training images.
+
+**The frontier moves again up to 640 values, and stops there.**
+
+| Parameters | Selected column dictionary | Columns read | Deployed weights | Index bits | Validation | Test |
+|---:|---|---:|---:|---:|---:|---:|
+| 96 | `pairs256` | 75 | 3,300 | 1,560 | 0.5040 | 0.4887 |
+| 128 | `pairs181` | 103 | 4,532 | 2,437 | 0.5803 | 0.5578 |
+| 160 | `pairs256` | 133 | 5,852 | 3,481 | 0.6290 | 0.6079 |
+| 176 | `pairs256` | 145 | 6,380 | 3,961 | 0.6481 | 0.6222 |
+| 192 | `pairs256` | 157 | 6,908 | 4,441 | 0.6643 | 0.6360 |
+| **208** | `pairs181` | 136 | 5,984 | 4,758 | 0.6760 | **0.6505** |
+| 224 | `pairs256` | 163 | 7,172 | 5,401 | 0.6797 | 0.6619 |
+| 240 | `pairs256` | 181 | 7,964 | 5,881 | 0.6992 | 0.6717 |
+| 256 | `pairs256` | 181 | 7,964 | 6,361 | 0.7094 | 0.6790 |
+| 272 | `pairs181` | 159 | 6,996 | 6,615 | 0.7065 | 0.6859 |
+| 288 | `pairs256` | 194 | 8,536 | 7,321 | 0.7165 | 0.6968 |
+| 304 | `pairs181` | 171 | 7,524 | 7,544 | 0.7184 | 0.6965 |
+| **320** | `pairs256` | 211 | 9,284 | 8,282 | 0.7260 | **0.7010** |
+| 352 | `pairs256` | 220 | 9,680 | 9,242 | 0.7303 | 0.7065 |
+| 384 | `pairs256` | 228 | 10,032 | 10,202 | 0.7387 | 0.7243 |
+| 448 | `pairs256` | 246 | 10,824 | 12,122 | 0.7563 | 0.7271 |
+| 512 | `graded` | 456 | 20,064 | 13,792 | 0.7649 | 0.7359 |
+| 640 | `pairs181` | 274 | 12,056 | 17,292 | 0.7695 | 0.7497 |
+| 768 | `pairs256` | 306 | 13,464 | 21,724 | 0.7762 | 0.7551 |
+| 896 | `rand2x16384` | 461 | 20,284 | 23,894 | 0.7792 | 0.7495 |
+| 1,024 | `pairs128` | 355 | 15,620 | 27,473 | 0.7886 | 0.7659 |
+
+The smallest budget whose test accuracy clears **65%** falls from 256 to **208
+stored values** (65.05%) and the smallest that clears **70%** falls from 448 to
+**320** (70.10%).  Against the dense affine head's 2,156 and 2,860 values that
+is a **10.4x** and **8.9x** parameter reduction, and against the element-wise
+sparse head of two sections ago (512 and 896) it is 2.5x and 2.8x.  At 208
+values the head extracts 136 pool columns and deploys 5,984 dense weights
+reconstructed from 164 stored values plus 44 biases.
+
+**Above 640 values the column dictionary is worth nothing, and the table says
+so.**  The paired bootstrap of `pairs256` against the class-dictionary head is
++1.9 points [+0.7, +3.0] at 192 values, +2.7 [+1.6, +3.8] at 256, +1.9
+[+0.9, +2.8] at 512 and +1.7 [+0.8, +2.7] at 640 -- every interval excluding
+zero -- but +0.3 [-0.6, +1.2] at 768, +0.8 [-0.1, +1.6] at 896 and **-0.2**
+[-1.0, +0.7] at 1,024.  The 1,024-value
+operating point in the table, 0.7659, comes from `pairs128` winning a
+validation gate it wins by +0.6 points [-0.2, +1.5] on test -- inside the
++-0.6-point resolution of a 6,300-image split -- so it should be read as
+unchanged from the 0.7595 the same code path gives with `Df = I`, not as an
+improvement.  The 896-value row is the same effect with the opposite sign: the
+gate picks `rand2x16384`, whose 0.7495 is below the 768-value row's 0.7551.
+Three independent draws of `rand2x16384` give 0.6681/0.6752/0.6663 at 256
+values and 0.7414/0.7330/0.7190 at 512, so the sampled arms carry about a point
+of draw-to-draw variation of their own; the replication arms are reported but
+kept out of the validation gate.
+
+**What it costs.**  Extraction breadth is roughly unchanged, and falls where the
+budget is largest: at 256 stored values the pair head reads 181 pool columns
+against 158 for the class-dictionary head, but at 320 it reads 171 against 201
+and at 512 it reads 230 against 287, because a pair atom pays for two columns
+at once and the enumeration is restricted to the top-ranked ones.  The price is
+again index bits -- a stored value needs `log2(65792)` bits for the column id
+instead of `log2(512)`, which takes the index pattern from 4.9 to 6.4 kbit at
+256 values and from 10.8 to 14.0 kbit at 512.  Read at **equal total bits**
+rather than equal stored values the head is still ahead by +2.7 points at 0.57
+KiB, +1.5 at 1.78 KiB, +0.9 at 3.68 KiB and +0.7 at 4.61 KiB, and the advantage
+is gone by 5.7 KiB -- the same place the stored-value advantage goes.
+
+Reproduce with:
+
+```bash
+python experiments/resisc45_feature_dict.py
+```
+
+Results are written to `experiments/resisc45_feature_dict_result.csv` (about
+40 GPU-minutes for the full 21-budget grid);
+`resisc45_feature_dict.py --summarise` re-prints the dictionary comparison, the
+paired-bootstrap intervals, the frontier and the equal-bits comparison from the
+existing CSV.
 
 ## Image-statistics baseline
 
@@ -711,6 +865,8 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | Bagged (stability-selection) supports for the sparse RESISC45 head | Voting over 8-16 prune-and-regrow supports fitted on 60-80% subsamples loses 1.3-1.7 points of test accuracy at 512 values and 0.1-0.8 at 1,024; frequency voting rewards individually stable entries and reintroduces exactly the redundancy the regrow criterion removes |
 | Longer prune-and-regrow searches for RESISC45 | Quadrupling the search to 16,000 epochs and 400 mask updates raises validation at every budget, but the validation gate then moves test by between -0.36 and +0.85 and no target threshold moves; the 1,024-value operating point falls from 0.7290 to 0.7254 |
 | Complete class bases for the RESISC45 sparse head | Coding the head in its own principal class directions or in a DCT basis instead of the identity moves test accuracy by between -1.0 and +0.9 points with no consistent sign; a complete basis leaves the model class unchanged, so only *over-complete* dictionaries help |
+| Wide column atoms for the RESISC45 dictionary head | Widening the alphabet on the *column* axis only pays at width 2: 16,896 random atoms of width 4, 8 and 32 read 0.6560/0.6429/0.6417 test at 256 stored values and 16,896 dense random directions read 0.6557, against 0.6519 for the raw columns and 0.6790 for enumerated pairs; unlike the class axis, atom count alone buys nothing here, because a class's column pattern is sparse and a wide atom charges it for columns it does not want |
+| Larger pair enumerations for the RESISC45 column dictionary | Enumerating every signed pair of the top 320 ranked columns (102,592 atoms) is no better than the top 256 at 256 stored values (0.6765 against 0.6790) and 0.9-1.1 points worse at 512 and 1,024, where the atom count starts to overfit 18,900 training images |
 | Semantically chosen class groups for the RESISC45 dictionary head | Ward class groups from the pool or from the dense head's own rows beat size-matched random groups by 0.9 points at 256 stored values and by 0.03 at 1,024; the atom count is worth several times more than the atom content, and a random draw is as good as a designed one |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
@@ -741,8 +897,9 @@ python experiments/resisc45_rigl.py
 python experiments/resisc45_quadratic.py
 python experiments/resisc45_support_probe.py
 python experiments/resisc45_class_dict.py
+python experiments/resisc45_feature_dict.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, the support-search probe writes `experiments/resisc45_support_probe_result.csv`, and the class-dictionary head writes `experiments/resisc45_class_dict_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, the support-search probe writes `experiments/resisc45_support_probe_result.csv`, the class-dictionary head writes `experiments/resisc45_class_dict_result.csv`, and the column-dictionary head writes `experiments/resisc45_feature_dict_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
