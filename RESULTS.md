@@ -309,7 +309,7 @@ Which candidate list wins depends on the budget, and the crossover is informativ
 
 Three frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 640 to **512 stored values** (65.71%); the smallest that clears **70%** falls from 1,024 to **896** (71.62%), with validation already clearing 70% at 640; and the 1,024-value operating point improves from 71.67% to **72.90% test**, which is 2.4 points above what a *dense* head reaches with 2,860 values. Against the dense frontier, element-wise sparsity is now worth a 4.2x parameter reduction at 65% (512 against 2,156) and a 3.2x reduction at 70% (896 against 2,860).
 
-The one cost is breadth of feature extraction rather than stored values. A prune-only head at 1,024 values reads 207 pool columns; the regrown head reads 383, and the whole-pool arm reads 621. The stored-value count and the index pattern are unchanged -- one column id per stored weight either way -- but more of the 2,084-column pool has to be computed at inference time. Where extraction cost matters more than parameter count, the top-256 regrown arm is the compromise: 0.7214 test at 1,024 values from 228 columns, still 0.5 points above the prune-only head on a list half as wide.
+The one cost is breadth of feature extraction rather than stored values. A prune-only head at 1,024 values reads 207 pool columns; the regrown head reads 383, and the whole-pool arm reads 621. The stored-value count and the index pattern are unchanged -- one column id per stored weight either way -- but more of the 2,084-column pool has to be computed at inference time. Where extraction cost matters more than parameter count, the top-256 regrown arm is the compromise: 0.7214 test at 1,024 values from 228 columns, still 0.5 points above the prune-only head on a list half as wide. The section after next pushes that trade much further: measured against the whole-pool arm, restricting the pool to the top 128 ranked columns costs 1.75 points at 1,024 values and cuts extraction from 635 columns to 114, a 5.6x reduction.
 
 Reproduce with:
 
@@ -318,6 +318,197 @@ python experiments/resisc45_rigl.py
 ```
 
 Results are written to `experiments/resisc45_rigl_result.csv`; `resisc45_rigl.py --summarise` re-prints the comparison from the existing CSV.
+
+## Degree-2 products: the information is real, the budget cannot buy it
+
+Every RESISC45 head above is *linear* in the pool, so one stored value buys one
+column.  A product of two pool columns is still deterministic arithmetic on a
+single image -- no learned constants, the same zero-parameter status as every
+other column -- and standardising it folds into the head exactly like any other
+column, so a weight on `a*b` costs one stored value like any other weight.  At a
+budget where each class can afford ten to twenty weights, a column that already
+carries an interaction ought to be worth more per value than either factor
+alone.  `experiments/resisc45_quadratic.py` tests that, and separately tests
+whether products can buy back the one cost the previous section could not pay:
+the regrown head reads 383 of 2,084 pool columns and the whole-pool arm reads
+621, so a deployment has to compute most of the pool.  A degree-2 polynomial in
+`K` base columns needs only those `K` columns extracted, however many products
+it then reads.
+
+Products are formed from the top `K` columns of the same train-only group-lasso
+ranking the candidate lists use, giving `K(K+1)/2` extra columns (the diagonal
+is the squares).  Every arm searches its support with the same prune-and-regrow
+fitter over its whole column set -- no candidate list, no quota -- refits
+convexly, and picks search settings and `C` on validation.
+
+**Unconstrained, the interaction information is large and it is exactly where
+the linear pool is narrow.**
+
+| Pool | Columns extracted | Pool columns | Head values | Test |
+|---|---:|---:|---:|---:|
+| top 32, linear | 32 | 32 | 1,452 | 0.5363 |
+| top 32, degree 2 | 32 | 560 | 24,684 | **0.6262** |
+| top 64, linear | 64 | 64 | 2,860 | 0.6678 |
+| top 64, degree 2 | 64 | 2,144 | 94,380 | **0.7314** |
+| top 128, linear | 128 | 128 | 5,676 | 0.7446 |
+| top 128, degree 2 | 128 | 8,384 | 368,940 | **0.7762** |
+| top 256, linear | 256 | 256 | 11,308 | 0.7732 |
+| top 256, degree 2 | 256 | 33,152 | 1,458,732 | **0.7814** |
+| whole pool, linear | 2,084 | 2,084 | 91,740 | 0.7937 |
+| whole pool + top-128 products | 2,084 | 10,340 | 455,004 | **0.8071** |
+
+The gain decays monotonically with the width of the linear pool it is added to:
++9.0 points at 32 columns, +6.4 at 64, +3.2 at 128, +0.8 at 256, +1.3 on the
+whole pool.  Degree 2 on 128 columns (77.62%) matches linear on 256 (77.32%), so
+at the ceiling the expansion **halves the number of pool columns that have to be
+extracted**.  It also lifts the pool ceiling itself for the first time since the
+native-resolution rebuild: 79.37% on the merged 2,084-column pool, and 79.78%
+on the best pool measured anywhere in this file, against 80.71% test here.
+
+**Under a budget almost none of that survives.** Test accuracy at equal stored
+values, with each arm at its validation-selected search setting and `C`:
+
+| Parameters | top 128 linear | top 128 degree 2 | top 256 linear | top 256 degree 2 | whole linear | whole + products |
+|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 0.5092 | **0.5330** | 0.5281 | **0.5659** | 0.5616 | **0.5722** |
+| 384 | 0.5825 | **0.5981** | 0.6075 | **0.6219** | 0.6337 | 0.6181 |
+| 512 | 0.6246 | 0.6210 | 0.6381 | 0.6460 | 0.6532 | 0.6587 |
+| 640 | 0.6517 | 0.6578 | 0.6714 | 0.6619 | 0.6898 | 0.6744 |
+| 768 | 0.6733 | 0.6668 | 0.6817 | 0.6859 | 0.6987 | 0.6930 |
+| 896 | 0.6860 | 0.6795 | 0.7037 | 0.6894 | 0.7021 | 0.7083 |
+| 1,024 | 0.6995 | 0.6940 | 0.7051 | 0.6959 | 0.7170 | 0.7195 |
+
+At 256 and 384 stored values the expansion is worth 1.4 to 3.8 points on the
+fixed-`K` pools, which is the regime the argument predicted: with 212 weights
+for 45 classes each weight has to carry as much as possible.  From 512 values
+upwards the effect vanishes into the +-0.6-point sampling noise of a 6,300-image
+split and is as often negative as positive, and the frontier does not move --
+this experiment clears 65% at 512 values and 70% at 896, exactly where the
+previous section left them.  Validation is *not* neutral about this: it prefers
+an expanded pool at four of the seven budgets, including 1,024 (0.7444 against
+0.7348), while test does not follow.  The extra 8,000 to 33,000 candidate
+columns give the support search more ways to fit 18,900 training images than
+they give it real structure.
+
+The mechanism is that above roughly 512 stored values the budgeted head is
+**weight-limited, not column-limited**.  It already reads 348 distinct columns
+at 512 values and 635 at 1,024 -- far more columns than any class can afford to
+combine -- so a better-conditioned column does not relieve the binding
+constraint, it just enlarges the search space.  This mirrors the EuroSAT entry
+in the negative-results table below, where quadratic head features also raised
+validation fit without improving test, and it reaches the same conclusion from
+the opposite direction: on EuroSAT the pool was the constraint, here the head
+is, and a quadratic expansion helps neither.
+
+**What the experiment does buy is a cheaper extractor, and the linear pool
+supplies most of that on its own.** The base pool columns a deployment must
+actually compute, at 1,024 stored values:
+
+| Arm | Base columns extracted | Test |
+|---|---:|---:|
+| top 32, linear | 32 | 0.5537 |
+| top 64, linear | 55 | 0.6535 |
+| top 128, linear | 114 | 0.6995 |
+| top 128, degree 2 | 126 | 0.6940 |
+| top 256, linear | 216 | 0.7051 |
+| top 256, degree 2 | 241 | 0.6959 |
+| whole pool + products | 395 | 0.7195 |
+| whole pool, linear | 635 | 0.7170 |
+
+Restricting the pool to the top 128 ranked columns costs 1.75 points and cuts
+extraction from 635 columns to 114, a **5.6x reduction**; the top 256 costs 1.2
+points for a 2.9x reduction.  Adding products on top of a narrow pool does not
+improve that trade at this budget.  The extraction caveat the previous section
+left open is therefore answerable, but by narrowing the pool rather than by
+squaring it.
+
+One accounting note for the product arms: stored values are unchanged at
+`nonzeros + 44`, but a product weight has to name two base columns instead of
+one, so the conservative index pattern for the 1,024-value `whole + products`
+head is 1,640 ids rather than 980.
+
+Reproduce with:
+
+```bash
+python experiments/resisc45_quadratic.py
+```
+
+Results are written to `experiments/resisc45_quadratic_result.csv` (the
+`budget=0` rows are the unconstrained ceilings);
+`resisc45_quadratic.py --summarise` re-prints the tables, including the
+extraction Pareto front at every budget, from the existing CSV.
+
+## Spending more on the support search: bagging and longer runs
+
+The section above found that a wider pool only raises validation fit, and the
+one before it found that the support search is where the accuracy is.  Together
+those point at spending more compute on the search itself.
+`experiments/resisc45_support_probe.py` spends it in the two obvious directions
+and measures what comes back.  Both use the same convex refit and
+validation-selected `C`, and both are judged the only way that matters: does
+gating on validation move *test*?
+
+**Bagging the support loses.** If a wider candidate set overfits the support
+search, stability selection is the textbook fix -- fit prune-and-regrow on
+several subsamples of train, keep the entries that recur most often, refit that
+support convexly on the full split.
+
+| Support | 512 validation | 512 test | 1,024 validation | 1,024 test |
+|---|---:|---:|---:|---:|
+| Single fit (current) | 0.6729 | **0.6532** | 0.7337 | **0.7211** |
+| Bagged, 8 fits at 80% | 0.6527 | 0.6370 | 0.7246 | 0.7132 |
+| Bagged, 16 fits at 80% | 0.6544 | 0.6406 | 0.7314 | 0.7202 |
+| Bagged, 8 fits at 60% | 0.6568 | 0.6363 | 0.7305 | 0.7179 |
+
+Every bagged variant is worse on both splits, by 1.3 to 1.7 points of test
+accuracy at 512 values and 0.1 to 0.8 at 1,024, so the validation gate correctly
+rejects all of them.  The reason is the same one that sank the group-lasso
+ranking: **frequency voting scores each entry on how often it is chosen, never
+on what it adds given the others.** Averaging over subsamples rewards entries
+that are individually stable, which is exactly the redundant ones, and throws
+away the conditional growth criterion that made prune-and-regrow work.
+
+**Longer searches move validation but not the frontier.** `resisc45_rigl.py`
+found 4,000 epochs with 100 mask updates beat 2,000 with 100, so the number of
+regrow opportunities is a real hyperparameter; this sweeps it four-fold further
+on all three candidate lists.  The reference for each budget is the validation
+pick within the existing 4,000-epoch grid, which reproduces the arm and the test
+accuracy `resisc45_rigl.py` selected at every budget from 512 upwards, so this
+compares protocol against protocol rather than cell against cell.  (At 384 the
+reference reads 0.6238 against that section's 0.6259, because its grid also
+held a 4,000/200 setting this one does not.)
+
+| Parameters | Reference grid, test | Extended grid, best validation | Extended grid, test | Change (points) |
+|---:|---:|---:|---:|---:|
+| 384 | 0.6238 | 0.6460 | 0.6279 | +0.41 |
+| 512 | 0.6571 | 0.6817 | 0.6625 | +0.54 |
+| 640 | 0.6881 | 0.7081 | 0.6859 | -0.22 |
+| 768 | 0.6978 | 0.7310 | 0.7063 | +0.85 |
+| 896 | 0.7162 | 0.7430 | 0.7210 | +0.48 |
+| 1,024 | 0.7290 | 0.7490 | 0.7254 | -0.36 |
+
+Validation rises at every budget, by up to 0.8 points at 768, and test moves by
+between -0.36 and +0.85 -- four budgets up, two down, and no threshold moves:
+65% is still first cleared at 512 stored values and 70% at 896.  The 1,024-value
+operating point actually falls, because the extended grid's highest-validation
+cell (top-512 list, 8,000 epochs, 0.7490) tests at 0.7254 against the 0.7290 the
+unextended grid already reported.  Quadrupling the search is therefore
+indistinguishable from noise under this protocol, and the conclusion is that
+**the selection step, not the search, now consumes the difference**: at
+these budgets a 6,300-image validation split resolves about +-0.6 points, and
+every additional arm offered to the gate is another chance to spend that on
+nothing.  Claims below a point need a repeated-split or bootstrap interval
+before they should be believed.
+
+Reproduce with:
+
+```bash
+python experiments/resisc45_support_probe.py
+```
+
+Results are written to `experiments/resisc45_support_probe_result.csv`;
+`resisc45_support_probe.py --summarise` re-prints both comparisons from the
+existing CSV.
 
 ## Image-statistics baseline
 
@@ -394,6 +585,9 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | MOSAIKS/random convolutional features | Can reach 95%+, but needs roughly 4,617 head parameters at the 95% floor, about 17× submission 13 |
 | Merging a new RESISC45 feature family into one group-lasso ranking | The 505-column object-layout pool wins 113 of the merged top 256 slots and lowers validation accuracy at every budget; it only pays when capped at a reserved quota of candidate slots |
 | Iterative magnitude pruning as the support search for a sparse RESISC45 head | Prune-only cannot recover a column it drops, so it depends on a candidate list ranked against the label alone; prune-and-regrow beats it at every budget, by 7.6 points of test accuracy at 256 stored values and 1.0 at 1,024 |
+| Degree-2 products of RESISC45 pool columns | Zero-parameter and genuinely informative -- they lift the pool ceiling from 79.37% to 80.71% test and are worth +9.0/+6.4/+3.2 points on 32/64/128-column pools -- but above 512 stored values the head is weight-limited, not column-limited, so the expansion only raises validation fit and leaves the frontier where it was |
+| Bagged (stability-selection) supports for the sparse RESISC45 head | Voting over 8-16 prune-and-regrow supports fitted on 60-80% subsamples loses 1.3-1.7 points of test accuracy at 512 values and 0.1-0.8 at 1,024; frequency voting rewards individually stable entries and reintroduces exactly the redundancy the regrow criterion removes |
+| Longer prune-and-regrow searches for RESISC45 | Quadrupling the search to 16,000 epochs and 400 mask updates raises validation at every budget, but the validation gate then moves test by between -0.36 and +0.85 and no target threshold moves; the 1,024-value operating point falls from 0.7290 to 0.7254 |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
 
@@ -420,8 +614,10 @@ python experiments/resisc45_layout_gain.py
 python experiments/resisc45_layout_diagnose.py
 python experiments/resisc45_layout_frontier.py
 python experiments/resisc45_rigl.py
+python experiments/resisc45_quadratic.py
+python experiments/resisc45_support_probe.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, and the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, and the support-search probe writes `experiments/resisc45_support_probe_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
