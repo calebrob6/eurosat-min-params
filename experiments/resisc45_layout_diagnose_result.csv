@@ -1,0 +1,9 @@
+experiment,layout_columns,parameters,pool,quota,structure,test_accuracy,val_accuracy,width
+ceiling,,69520,base,-,C=0.03,0.7978,0.8108,1579
+ceiling,,22264,layout-only,-,C=0.03,0.6521,0.6624,505
+ceiling,,91740,merged,-,C=0.03,0.7937,0.8092,2084
+forced-quota,0,1024,merged,0,top256/C=100.0,0.7048,0.7246,256
+forced-quota,2,1024,merged,16,top256/C=100.0,0.7079,0.719,256
+forced-quota,15,1024,merged,32,top256/C=1.0,0.703,0.7213,256
+forced-quota,44,1024,merged,64,top256/C=3.0,0.7167,0.7305,256
+forced-quota,81,1024,merged,128,top256/C=1.0,0.7098,0.724,256

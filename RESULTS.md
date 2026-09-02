@@ -200,7 +200,7 @@ Classes the pool handles but the budget cannot afford:
 | river | 0.817 | 0.640 | 0.176 | wetland |
 | commercial_area | 0.779 | 0.607 | 0.171 | palace |
 
-Both lists are dominated by pairs that differ in *object layout* rather than in texture or colour statistics: a bridge is a river plus one elongated crossing structure, a harbour is water plus repeated docked hulls, a railway station is a railway plus platforms and buildings, and a palace is a church-like facade with different massing. The pool's 171 selected columns are correspondingly texture-heavy - 35 rotation-invariant LBP columns, 13 Fourier-ring columns, 10 multiscale gradient coefficients of variation - and contain nothing that counts or measures discrete elongated objects. Elongated-structure and repeated-object descriptors are therefore the highest-value additions to the pool, and they would help at every budget rather than only at the top.
+Both lists are dominated by pairs that differ in *object layout* rather than in texture or colour statistics: a bridge is a river plus one elongated crossing structure, a harbour is water plus repeated docked hulls, a railway station is a railway plus platforms and buildings, and a palace is a church-like facade with different massing. The pool's 171 selected columns are correspondingly texture-heavy - 35 rotation-invariant LBP columns, 13 Fourier-ring columns, 10 multiscale gradient coefficients of variation - and contain nothing that counts or measures discrete elongated objects. Elongated-structure and repeated-object descriptors are therefore the highest-value additions to the pool. The next section builds them and tests that prediction; it holds, but only under a quota, and for a different reason than expected.
 
 Reproduce both experiments with:
 
@@ -210,6 +210,68 @@ python experiments/resisc45_failure_analysis.py
 ```
 
 Results are written to `experiments/resisc45_param_frontier_result.csv` and `experiments/resisc45_failure_analysis_result.csv`.
+
+## An object-layout pool, and why it only pays under a quota
+
+The section above predicted that elongated-structure and repeated-object descriptors were the highest-value addition to the RESISC45 pool. `experiments/resisc45_gpu_features3.py` adds 505 such columns, extracted from the same native 256x256 cache in about seven GPU-minutes and still deterministic arithmetic on a single image:
+
+* **radon** -- projection profiles at twelve fixed angles, so one long straight structure becomes a single sharp profile peak and a set of parallel structures becomes a periodic profile: angular energy shares, two-fold and four-fold angular harmonics, best-angle peak height, supra-threshold peak count, and profile periodicity;
+* **ridge** -- Hessian ridge (vesselness) strength, linearity, sign, and orientation coherence at three fixed scales;
+* **run** -- directional run lengths of thresholded ridge, edge, and dark masks in four directions, which measure how far a thin structure actually continues;
+* **blob** -- difference-of-Gaussian local-maximum counts at three scales plus the second moments of the maximum cloud, which count repeated discrete objects and measure whether they lie along a line;
+* **polar** -- rotational and mirror self-similarity, log-polar radial bands, and angular harmonics, which separate a ring layout from a radial-arm layout;
+* **mask** -- second moments, border spanning, and profile breaks of percentile-thresholded regions.
+
+**Merging the pools and re-ranking makes the frontier worse.** `experiments/resisc45_layout_gain.py` re-runs the sparse frontier on the 1,579-column pool and on the merged 2,084-column pool under identical settings. The group-lasso ranking likes the new family -- 113 of the merged top 256 columns come from it -- and the result is *worse on validation at every budget*, which is the criterion that governs selection.
+
+| Parameters | Base validation | Merged validation | Base test | Merged test |
+|---:|---:|---:|---:|---:|
+| 512 | 0.6287 | 0.6160 | 0.6059 | 0.6008 |
+| 640 | 0.6651 | 0.6613 | 0.6435 | 0.6508 |
+| 768 | 0.6881 | 0.6784 | 0.6744 | 0.6576 |
+| 896 | 0.7090 | 0.7000 | 0.6900 | 0.6886 |
+| 1,024 | 0.7246 | 0.7140 | 0.7048 | 0.6940 |
+
+Per class the intended effect is clearly present and clearly paid for. At 1,024 values the merged pool gains on exactly the classes the failure analysis named -- thermal_power_station +5.9, rectangular_farmland +5.2, ship +5.2, wetland +5.1, bridge +5.0 points -- and loses palace -12.9, storage_tank -8.8, harbor -7.7, desert -5.5, airplane -5.3. At a fixed budget the head reallocates weights to the new columns for the classes that want them and starves the rest.
+
+**The diagnosis is redundancy, not weakness.** `experiments/resisc45_layout_diagnose.py` separates the two candidate explanations. The layout family is genuinely informative on its own: a 505-column unconstrained head reaches **65.21% test**, clearing the first target from the new family alone -- at 22,264 stored values, so this is a statement about information content rather than about the budget. But it adds almost nothing the old pool did not already have -- the unconstrained ceiling moves from 79.78% test on 1,579 columns to 79.37% on 2,084. The log-Gabor, autocorrelation, projection-profile, and LBP families already encode most of what oriented and periodic structure there is to encode. What the new family supplies is not new information but a *better-conditioned* small subset of it.
+
+**A quota converts that into accuracy.** Instead of letting the two pools compete for one ranking, reserve `q` of the 256 candidate slots for the layout pool and give the rest to the base ranking. `experiments/resisc45_layout_frontier.py` sweeps `q` against the budget; `q` and `C` are chosen on validation and test is read once per row.
+
+| Parameters | q=0 | q=32 | q=64 | q=128 | Selected q | Validation | Test |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 512 | 0.6059 | 0.6232 | 0.6290 | 0.6114 | 64 | 0.6387 | 0.6290 |
+| 640 | 0.6421 | 0.6579 | 0.6554 | 0.6465 | 64 | 0.6749 | **0.6554** |
+| 768 | 0.6740 | 0.6819 | 0.6794 | 0.6679 | 64 | 0.7008 | 0.6794 |
+| 896 | 0.6860 | 0.6879 | 0.6967 | 0.6921 | 32 | 0.7127 | 0.6879 |
+| 1,024 | 0.7048 | 0.7030 | **0.7167** | 0.7098 | 64 | 0.7305 | **0.7167** |
+
+(the `q` columns are test accuracy at that quota; the last three columns are the validation-selected operating point. This experiment fixes the candidate list at 256 columns, so the `q=0` column is not identical to the frontier table above, which also swept the candidate-list size.)
+
+Two frontier movements follow. The smallest budget whose test accuracy clears **65%** falls from 768 to **640 stored values** (65.54%), and the 1,024-value operating point improves from 70.48% to **71.67% test**. 70% still needs the full 1,024 values on test, although validation already clears it at 768. About a fifth of the columns the budgeted head ends up reading are layout columns (44 of 207 at 1,024 values).
+
+**How much of that is the quota and how much is the family?** Widening a candidate list at all is worth something, so the same experiment runs a control that gives the same 64 displaced slots to the *next* 64 base columns by group-lasso rank instead of to layout columns.
+
+| Parameters | q=0 | Control (64 more base columns) | 64 layout columns |
+|---:|---:|---:|---:|
+| 512 | 0.6059 | 0.6183 | 0.6290 |
+| 640 | 0.6421 | 0.6483 | 0.6554 |
+| 768 | 0.6740 | 0.6746 | 0.6794 |
+| 896 | 0.6860 | 0.6875 | 0.6967 |
+| 1,024 | 0.7048 | 0.7106 | 0.7167 |
+
+About half the gain is candidate-list churn that any 64 extra columns would deliver, and the layout family beats the control on test at all five budgets by 0.5 to 1.1 points. The family-specific contribution is real but modest, and it is only reachable when the family is quota-limited rather than allowed to win the ranking on its own merits.
+
+Reproduce the whole sequence with:
+
+```bash
+python experiments/resisc45_gpu_features3.py
+python experiments/resisc45_layout_gain.py
+python experiments/resisc45_layout_diagnose.py
+python experiments/resisc45_layout_frontier.py
+```
+
+Results are written to `experiments/resisc45_layout_gain_result.csv` (with per-class deltas in `experiments/resisc45_layout_gain_classes.csv`), `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`. `resisc45_layout_frontier.py --summarise` re-prints the frontier summary from the existing CSV.
 
 ## Image-statistics baseline
 
@@ -284,6 +346,7 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | Distillation into tiny convolutional students | A 98% teacher does not overcome the student's representation bottleneck |
 | RGB-only models | Remove the NIR/SWIR information that separates vegetation, crops, water, and built surfaces without reducing linear-head cost |
 | MOSAIKS/random convolutional features | Can reach 95%+, but needs roughly 4,617 head parameters at the 95% floor, about 17× submission 13 |
+| Merging a new RESISC45 feature family into one group-lasso ranking | The 505-column object-layout pool wins 113 of the merged top 256 slots and lowers validation accuracy at every budget; it only pays when capped at a reserved quota of candidate slots |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
 
@@ -305,8 +368,12 @@ python experiments/coordinate_mlp.py
 python experiments/resisc45_33_feature.py --download
 python experiments/resisc45_param_frontier.py
 python experiments/resisc45_failure_analysis.py
+python experiments/resisc45_gpu_features3.py
+python experiments/resisc45_layout_gain.py
+python experiments/resisc45_layout_diagnose.py
+python experiments/resisc45_layout_frontier.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
