@@ -84,6 +84,26 @@ The initial sweep uses seed 0 and validation only. Strong candidates across the 
 
 The strongest coordinate-only MLP reaches 66.03% test accuracy with 7,753 learned parameters. Wider 128-unit networks, denser directional Fourier bases, and fixed RBF grids do not improve validation accuracy. Geographic centroids therefore contain substantial random-split signal, but are far less accurate and less parameter-efficient than the 33-feature image model, which reaches 96.04% with 306 parameters.
 
+## RESISC45 RGB transfer
+
+The 33-feature handcrafted approach was adapted for a preliminary RESISC45 trial. RESISC45 contains 31,500 RGB images across 45 scene classes with TorchGeo's fixed 18,900/6,300/6,300 train/validation/test split. Images are resized bilinearly from 256×256 to 64×64 before fixed feature extraction.
+
+Because RESISC45 has only RGB channels, the Sentinel-2 feature set cannot be transferred literally. The adapted 147-feature zero-parameter pool preserves the same concepts: per-channel distributions, multiscale gradients, structure-tensor coherence, orientation distributions, Fourier texture, RGB cross-channel correlation, fine and coarse texture of excess-green/color-contrast/saturation/lightness maps, and global Hough-line, Harris-corner, LBP, connected-component, radial-spectrum, and region-shape summaries. Train-only L1 coefficient ranking selects exactly 33 features from this pool. Validation selects `C=3000` for the folded reference-class multinomial logistic regression.
+
+With 45 classes, the 33-feature head stores `(45 - 1) × (33 + 1) = 1,496` learned parameters. The selected full-training model reaches **61.57% validation accuracy and 58.87% test accuracy**.
+
+| Training fraction | Images | Seed | RESISC45 test accuracy |
+|---:|---:|---:|---:|
+| 1% | 189 | 0 | 0.2789 |
+| 2% | 378 | 0 | 0.3130 |
+| 5% | 945 | 0 | 0.4000 |
+| 10% | 1,890 | 0 | 0.4795 |
+| 20% | 3,780 | 0 | 0.5351 |
+| 50% | 9,450 | 0 | 0.5724 |
+| 100% | 18,900 | 0 | **0.5887** |
+
+This is an initial transfer rather than a RESISC45-optimized frontier. The feature subset is selected once using the full training split, and the full-data validation-selected `C` is then held fixed for every fraction. The lower fractions use one stratified subsample seed as requested. The result shows that the fixed spatial-statistics approach transfers beyond EuroSAT, but RESISC45's 45 fine-grained RGB classes require substantially more discrimination than 33 global summary features provide.
+
 ## Image-statistics baseline
 
 The baseline computes four statistics independently for each band:
@@ -175,8 +195,9 @@ python experiments/image_statistics_baseline.py
 python experiments/eval_training_fractions.py --download-spatial-splits
 python experiments/eval_imagestats_fractions.py --download-spatial-splits
 python experiments/coordinate_mlp.py
+python experiments/resisc45_33_feature.py --download
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The fraction evaluators verify the official TorchGeo split checksums and remap the existing 27,000-sample fixed-feature caches by filename. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.

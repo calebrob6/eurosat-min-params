@@ -475,7 +475,7 @@ def patch_features(
     if pcts:
         pc = np.percentile(flat, pcts, axis=2).transpose(1, 0, 2).reshape(n, -1)
         parts.append(pc)
-        names += [f'p{p}_b{i}' for i in range(c) for p in pcts]
+        names += [f'p{p}_b{i}' for p in pcts for i in range(c)]
     cur = imgs
     for s in range(grad_scales):
         g = _grad_mag(cur).reshape(n, c, -1)
