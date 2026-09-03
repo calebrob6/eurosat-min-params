@@ -120,6 +120,10 @@ def main() -> None:
     parser.add_argument('--d8', action='store_true',
                         help='read the dihedral-averaged pools (resisc45_dihedral_pools.py) '
                              'in place of every GPU pool')
+    parser.add_argument('--pool-suffix', default=None,
+                        help='read the pools with this suffix (e.g. j32 for the averaged jitter '
+                             'families of resisc45_jitter_pools.py) in place of every GPU pool; '
+                             '--d8 is the same as --pool-suffix d8')
     parser.add_argument('--transform', choices=('none', 'sqrt', 'cbrt', 'quart', 'pick-skew'),
                         default='none',
                         help='fixed per-column monotone transform sign(x)|x|^p of every column '
@@ -137,8 +141,10 @@ def main() -> None:
         import resisc45_search_decay
         resisc45_search_decay.C_GRID = tuple(args.c_grid)
 
+    suffix = args.pool_suffix or ('d8' if args.d8 else None)
+
     def pool_name(name):
-        return name.replace('_pool', 'd8_pool') if args.d8 and name != 'rgb_pool' else name
+        return name.replace('_pool', f'{suffix}_pool') if suffix and name != 'rgb_pool' else name
 
     base, y, _ = load_pools(tuple(pool_name(p) for p in BASE_POOLS))
     layout, _, _ = load_pools((pool_name(LAYOUT_POOL),))
