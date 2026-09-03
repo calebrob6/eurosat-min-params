@@ -114,17 +114,27 @@ def main() -> None:
     parser.add_argument('--extra-pool', default='gpu5_pool',
                         help='fourth quota block; a quota name with four parts '
                              '(q384/128/128/64) admits its top columns')
+    parser.add_argument('--extra-pool2', default='gpu6_pool',
+                        help='fifth quota block; a quota name with five parts '
+                             '(q384/128/128/96/64) admits its top columns')
+    parser.add_argument('--d8', action='store_true',
+                        help='read the dihedral-averaged pools (resisc45_dihedral_pools.py) '
+                             'in place of every GPU pool')
     parser.add_argument('--out', default=RESULT_PATH)
     args = parser.parse_args()
     if args.c_grid:
         import resisc45_search_decay
         resisc45_search_decay.C_GRID = tuple(args.c_grid)
 
-    base, y, _ = load_pools(BASE_POOLS)
-    layout, _, _ = load_pools((LAYOUT_POOL,))
-    new, _, _ = load_pools(('gpu4_pool',))
-    extra, _, _ = load_pools((args.extra_pool,))
-    blocks = (base, layout, new, extra)
+    def pool_name(name):
+        return name.replace('_pool', 'd8_pool') if args.d8 and name != 'rgb_pool' else name
+
+    base, y, _ = load_pools(tuple(pool_name(p) for p in BASE_POOLS))
+    layout, _, _ = load_pools((pool_name(LAYOUT_POOL),))
+    new, _, _ = load_pools((pool_name('gpu4_pool'),))
+    extra, _, _ = load_pools((pool_name(args.extra_pool),))
+    extra2, _, _ = load_pools((args.extra_pool2,))
+    blocks = (base, layout, new, extra, extra2)
     orders = [group_lasso_rank(b['train'], y['train'], lam=LAM, epochs=1500)[0] for b in blocks]
 
     def build(quota):
