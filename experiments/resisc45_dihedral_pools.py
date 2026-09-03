@@ -35,6 +35,7 @@ MODULES = {
     'gpu4_pool': 'resisc45_gpu_features4',
     'gpu5_pool': 'resisc45_gpu_features5',
     'gpu6_pool': 'resisc45_gpu_features6',
+    'gpu7_pool': 'resisc45_gpu_features7',
 }
 
 

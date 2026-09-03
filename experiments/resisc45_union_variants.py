@@ -124,6 +124,9 @@ def main() -> None:
                         help='read the pools with this suffix (e.g. j32 for the averaged jitter '
                              'families of resisc45_jitter_pools.py) in place of every GPU pool; '
                              '--d8 is the same as --pool-suffix d8')
+    parser.add_argument('--rank-pool-suffix', default=None,
+                        help='rank columns from this pool suffix while fitting values from '
+                             '--pool-suffix; supports same-column view comparisons')
     parser.add_argument('--transform', choices=('none', 'sqrt', 'cbrt', 'quart', 'pick-skew'),
                         default='none',
                         help='fixed per-column monotone transform sign(x)|x|^p of every column '
@@ -140,6 +143,8 @@ def main() -> None:
     if args.c_grid:
         import resisc45_search_decay
         resisc45_search_decay.C_GRID = tuple(args.c_grid)
+    if args.rank_pool_suffix and args.transform != 'none':
+        parser.error('--rank-pool-suffix cannot be combined with --transform')
 
     suffix = args.pool_suffix or ('d8' if args.d8 else None)
 
@@ -162,6 +167,36 @@ def main() -> None:
         orders = [group_lasso_rank(b['train'], y['train'], lam=LAM, epochs=1500)[0]
                   for b in rank_on]
         blocks = transformed
+    elif args.rank_pool_suffix:
+        rank_suffix = args.rank_pool_suffix
+
+        def rank_pool_name(name):
+            return (
+                name.replace('_pool', f'{rank_suffix}_pool')
+                if name != 'rgb_pool'
+                else name
+            )
+
+        rank_base, _, _ = load_pools(
+            tuple(rank_pool_name(pool) for pool in BASE_POOLS)
+        )
+        rank_layout, _, _ = load_pools((rank_pool_name(LAYOUT_POOL),))
+        rank_new, _, _ = load_pools((rank_pool_name('gpu4_pool'),))
+        rank_extra, _, _ = load_pools((rank_pool_name(args.extra_pool),))
+        rank_extra2, _, _ = load_pools((args.extra_pool2,))
+        rank_blocks = (
+            rank_base,
+            rank_layout,
+            rank_new,
+            rank_extra,
+            rank_extra2,
+        )
+        orders = [
+            group_lasso_rank(
+                block['train'], y['train'], lam=LAM, epochs=1500
+            )[0]
+            for block in rank_blocks
+        ]
     else:
         orders = [group_lasso_rank(b['train'], y['train'], lam=LAM, epochs=1500)[0]
                   for b in blocks]

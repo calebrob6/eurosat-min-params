@@ -1,0 +1,6 @@
+arm,columns,C,train_accuracy,val_accuracy,test_accuracy,seconds
+list768-d8,768,0.03,0.9571,0.8487,0.8325,3.5
+list768-crop40-samecols,768,0.03,0.959,0.8616,0.8411,3.7
+list768-crop40-reranked,768,0.03,0.9604,0.8603,0.84,3.7
+list768-j48crop-samecols,768,0.03,0.959,0.8629,0.8419,3.7
+list768-j48crop-reranked,768,0.03,0.96,0.8617,0.8386,3.6

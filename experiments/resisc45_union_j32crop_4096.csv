@@ -1,0 +1,5 @@
+arm,list,transform,hinge,hinge_used,prune_c,columns,budget,deployed_values,fraction,searches,groups,seed_offset,union,C,train_accuracy,val_accuracy,test_accuracy,seconds
+quota,q384/128/128/128,none,0,0,0.1,768,4052,4096,1.0,8,1,0,14608,0.03,0.9464,0.8435,0.8256,29.1
+quota,q384/128/128/128,none,0,0,0.1,768,4052,4096,1.0,8,1,16,14985,0.01,0.933,0.8427,0.8248,29.1
+quota,q384/128/128/128,none,0,0,0.1,768,4052,4096,1.0,8,1,32,15574,0.01,0.9341,0.8435,0.8217,29.0
+quota,q384/128/128/128,none,0,0,0.1,768,4052,4096,1.0,8,1,48,14241,0.01,0.9317,0.8411,0.8235,29.1

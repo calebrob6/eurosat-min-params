@@ -70,7 +70,8 @@ def resized(images: np.ndarray, size: int, device: str = 'cuda', batch: int = 51
     return out
 
 
-def views(images: np.ndarray, family: str, native: bool = False):
+def views(images: np.ndarray, family: str, native: bool = False,
+          crop_shift: int = 0):
     """Eight ``(tag, view)`` pairs for the family, dihedral views over crops or scales.
 
     With ``native`` every view is resized back to the cached 256 x 256 before it
@@ -79,7 +80,9 @@ def views(images: np.ndarray, family: str, native: bool = False):
     """
     size = images.shape[-1]
     if family == 'c224':
-        for (tag, view), (dy, dx) in zip(transforms(images), CROP_OFFSETS):
+        shift = crop_shift % len(CROP_OFFSETS)
+        offsets = CROP_OFFSETS[shift:] + CROP_OFFSETS[:shift]
+        for (tag, view), (dy, dx) in zip(transforms(images), offsets):
             crop = view[:, :, dy:dy + CROP, dx:dx + CROP]
             yield f'{tag}-y{dy}x{dx}', resized(crop, size) if native else crop
     elif family in SCALES:
@@ -107,21 +110,39 @@ def average_families(pools, families, name, splits) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--family', choices=('c224',) + tuple(SCALES))
+    parser.add_argument('--crop-shift', type=int, default=0,
+                        help='cyclic shift of crop offsets relative to dihedral views; '
+                             'use with --name to cache a complementary c224 pairing')
     parser.add_argument('--average', nargs='*', default=None,
                         help='cache the mean of these cached families (e.g. d8 c224 s192 s320) '
                              'under the suffix given by --name instead of extracting')
-    parser.add_argument('--name', default=None, help='pool suffix for --average (e.g. j32)')
-    parser.add_argument('--pools', nargs='*', default=[p for p in MODULES if p != 'gpu6_pool'])
+    parser.add_argument('--name', default=None,
+                        help='output pool suffix for extraction or --average (e.g. c224s1, j24)')
+    parser.add_argument(
+        '--pools',
+        nargs='*',
+        default=[
+            pool
+            for pool in MODULES
+            if pool not in ('gpu6_pool', 'gpu7_pool')
+        ],
+    )
     parser.add_argument('--splits', nargs='*', default=['train', 'val', 'test'])
     parser.add_argument('--smoke', type=int, default=0,
                         help='extract only this many images per split and do not cache')
     args = parser.parse_args()
     if args.average:
+        if not args.name:
+            parser.error('--name is required with --average')
         average_families(args.pools, args.average, args.name, args.splits)
         return
+    if args.crop_shift and args.family != 'c224':
+        parser.error('--crop-shift is only valid with --family c224')
+    if args.crop_shift and not args.name:
+        parser.error('--name is required when --crop-shift is nonzero')
     for pool in args.pools:
         module = importlib.import_module(MODULES[pool])
-        out_name = family_name(pool, args.family)
+        out_name = family_name(pool, args.name or args.family)
         names = None
         for split in args.splits:
             images = np.load(os.path.join(CACHE_DIR, f'resisc45_{split}_x_uint8_256.npy'),
@@ -130,7 +151,12 @@ def main() -> None:
                 images = np.array(images[:args.smoke])
             total = None
             t0 = time.time()
-            for tag, view in views(images, args.family, native=pool == 'gpu3_pool'):
+            for tag, view in views(
+                images,
+                args.family,
+                native=pool == 'gpu3_pool',
+                crop_shift=args.crop_shift,
+            ):
                 with torch.no_grad():
                     features, names = module.extract(view)
                 features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)

@@ -66,6 +66,9 @@ def main() -> None:
     parser.add_argument('--out', default=RESULT_PATH)
     parser.add_argument('--pairs', default=PAIRS_PATH)
     parser.add_argument('--skip-merged', action='store_true')
+    parser.add_argument('--simple', action='store_true',
+                        help='read each cached family alone on the d8 columns and '
+                             'its own re-ranked columns; do not average families')
     args = parser.parse_args()
 
     loaded = {'d8': load_family('d8')[0]}
@@ -82,34 +85,80 @@ def main() -> None:
     def cat(a, b):
         return {s: np.concatenate([a[s], b[s]], axis=1) for s in a}
 
-    averages = {}
-    for family in args.families:
-        averages[f'd8+{family}'] = mean_of([loaded['d8'], loaded[family]])
-    scales = [f for f in args.families if f.startswith('s')]
-    if len(scales) > 1:
-        averages['d8+' + '+'.join(scales)] = mean_of([loaded['d8']] + [loaded[f] for f in scales])
-    if len(args.families) > 1:
-        averages['d8+' + '+'.join(args.families)] = mean_of([loaded['d8']]
-                                                            + [loaded[f] for f in args.families])
-    widest_name = list(averages)[-1]
-    widest = averages[widest_name]
-
     arms = [('list768-d8', build(loaded['d8']))]
-    arms += [(f'list768-{f}-samecols', build(loaded[f])) for f in args.families]
-    arms += [(f'list768-{name}-samecols', build(blocks)) for name, blocks in averages.items()]
-    orders_w = [group_lasso_rank(b['train'], y['train'], lam=LAM, epochs=1500)[0] for b in widest]
-    for (name, _), o, ow in zip(BLOCKS, orders, orders_w):
-        q = QUOTA[[b[0] for b in BLOCKS].index(name)]
-        print(f'{name}: {len(set(o[:q]) & set(ow[:q]))}/{q} top columns shared', flush=True)
-    arms.append((f'list768-{widest_name}-reranked', build(widest, orders_w)))
-    arms.append((f'list768-d8+{widest_name}-appended', cat(build(loaded['d8']), build(widest))))
-    for i, (name, _) in enumerate(BLOCKS):
-        mixed = [widest[j] if j == i else loaded['d8'][j] for j in range(len(BLOCKS))]
-        arms.append((f'list768-{widest_name}-{name}-only', build(mixed)))
+    if args.simple:
+        for family in args.families:
+            arms.append((f'list768-{family}-samecols', build(loaded[family])))
+            family_orders = [
+                group_lasso_rank(
+                    block['train'], y['train'], lam=LAM, epochs=1500
+                )[0]
+                for block in loaded[family]
+            ]
+            arms.append((
+                f'list768-{family}-reranked',
+                build(loaded[family], family_orders),
+            ))
+        averages = {}
+    else:
+        averages = {}
+        for family in args.families:
+            averages[f'd8+{family}'] = mean_of([loaded['d8'], loaded[family]])
+        scales = [f for f in args.families if f.startswith('s')]
+        if len(scales) > 1:
+            averages['d8+' + '+'.join(scales)] = mean_of(
+                [loaded['d8']] + [loaded[f] for f in scales]
+            )
+        if len(args.families) > 1:
+            averages['d8+' + '+'.join(args.families)] = mean_of(
+                [loaded['d8']] + [loaded[f] for f in args.families]
+            )
+        widest_name = list(averages)[-1]
+        widest = averages[widest_name]
+
+        arms += [
+            (f'list768-{f}-samecols', build(loaded[f]))
+            for f in args.families
+        ]
+        arms += [
+            (f'list768-{name}-samecols', build(blocks))
+            for name, blocks in averages.items()
+        ]
+        orders_w = [
+            group_lasso_rank(
+                block['train'], y['train'], lam=LAM, epochs=1500
+            )[0]
+            for block in widest
+        ]
+        for (name, _), order, widest_order in zip(BLOCKS, orders, orders_w):
+            quota = QUOTA[[block[0] for block in BLOCKS].index(name)]
+            shared = len(set(order[:quota]) & set(widest_order[:quota]))
+            print(f'{name}: {shared}/{quota} top columns shared', flush=True)
+        arms.append((
+            f'list768-{widest_name}-reranked',
+            build(widest, orders_w),
+        ))
+        arms.append((
+            f'list768-d8+{widest_name}-appended',
+            cat(build(loaded['d8']), build(widest)),
+        ))
+        for index, (name, _) in enumerate(BLOCKS):
+            mixed = [
+                widest[position] if position == index else loaded['d8'][position]
+                for position in range(len(BLOCKS))
+            ]
+            arms.append((
+                f'list768-{widest_name}-{name}-only',
+                build(mixed),
+            ))
+
     if not args.skip_merged:
         arms.append(('merged-d8', {s: np.concatenate([b[s] for b in loaded['d8']], axis=1) for s in y}))
-        arms.append((f'merged-{widest_name}', {s: np.concatenate([b[s] for b in widest], axis=1)
-                                               for s in y}))
+        if not args.simple:
+            arms.append((f'merged-{widest_name}', {
+                s: np.concatenate([b[s] for b in widest], axis=1)
+                for s in y
+            }))
 
     rows, preds = [], {}
     for arm, x in arms:

@@ -1479,6 +1479,43 @@ Test accuracy. At 3,628 deployed values the eight `j16` heads read **0.8213 +/- 
 
 **The 4,096-value frontier after this section.** The union-of-eight head on the 16-view (dihedral x crop) averaged 736-column 384/128/128 + 96 list at 3,584 code values reads **82.02% test at 3,628 deployed values** (validation 0.8422, the validation pick among eight heads; best draw 82.44%), the method's expected test accuracy at that budget is 82.1% +/- 0.2 over eight heads on two lists and four disjoint search sets, 81.4-81.9% at 2,604 values, 80.7-81.7% at 2,092, and 80% is reached at 1,580 values on both search sets of the + 128 list on the crop pools. Nothing in the deployed head changed: the extractor averages its zero-parameter columns over sixteen views of the image (eight dihedral elements of the whole frame and eight of a 224-pixel crop) at sixteen times the extraction cost. What is left: the averaged list's dense ceiling is 83.7-83.9% (merged 83.9%), the head recovers it minus 1.2-1.7 points, the pixel scale is not a nuisance to average, and church/palace and basketball/tennis still read 37-38 and 21-23 dense errors; the cheap follow-ups are more or smaller crops (a second eight-crop family at eight more extractions) and the crop average applied to a list re-ranked on it, and the expensive one remains part features for the two big pairs.
 
+**The exact 4,096-value cap.** Four disjoint search-offset groups were run at 3,884 and exactly 4,096 deployed values on both j16 quota lists. The extra values help only up to 3,884; the exact-cap result is slightly worse on both mean validation and mean test. Progressive crop averaging, described below, selects j32crop values with the original d8 rankings at both larger budgets:
+
+| Deployed values | Validation-selected view/list | Mean validation | Mean test | Test standard deviation | Test range |
+|---:|---|---:|---:|---:|---:|
+| 3,628 | `j16`, own-ranked +96 | 0.83960 | 0.82188 | 0.00182 | 0.8202-0.8244 |
+| **3,884** | **`j32crop`, d8-ranked +128** | **0.84525** | **0.82438** | 0.00227 | 0.8227-0.8275 |
+| 4,096 | `j32crop`, d8-ranked +128 | 0.84270 | 0.82390 | 0.00170 | 0.8217-0.8256 |
+
+The best individual test draw is 82.87% from j16 +128 at 3,884 values, but its mean validation is lower and it is not the selected model. The headline is the repeated validation-selected result: **82.44% +/- 0.23 test at 3,884 deployed values**, approximately +0.25 points over the previous 3,628-value expected result.
+
+**Progressive crop averaging.** `resisc45_jitter_pools.py` can now shift the assignment between eight fixed 224-pixel crop offsets and the eight dihedral transforms, creating complementary eight-view families without changing any feature definition. Progressive means show a clear validation optimum at 32 views:
+
+| Cached view family | Effective views | Same-column validation | Same-column test |
+|---|---:|---:|---:|
+| `d8` | 8 | 0.8487 | 0.8325 |
+| `j16` | 16 | 0.8589 | 0.8365 |
+| `crop16` | 16 crop views | 0.8592 | 0.8421 |
+| `j24` | 24 | 0.8597 | 0.8402 |
+| **`j32crop`** | **32** | **0.8643** | 0.8410 |
+| `j40crop` | 40 | 0.8627 | 0.8406 |
+| `j48crop` | 48 | 0.8629 | 0.8419 |
+
+Both larger means lose validation, so view expansion stops at j32crop. Re-ranking columns on each averaged family is also worse on validation. Under the sparse union head the ceiling gain becomes validation margin rather than a readable test gain: at 3,884 values j32crop is 82.44% +/- 0.23 test, tied with j16's 82.47% +/- 0.16 despite higher validation.
+
+**Cross-part configuration features.** `resisc45_gpu_features7.py` adds 966 fixed columns measuring containment, adjacency at three radii, centroid spacing, radial order, principal-axis agreement, and coarse layout correlation among color, edge, bright-marking, and dark-line masks. The pool is extracted under j32crop and screened behind a reserved quota:
+
+| Dense arm | Columns | Validation | Test |
+|---|---:|---:|---:|
+| j32crop baseline, d8-ranked | 768 | 0.8643 | 0.8410 |
+| + top 64 part columns | 832 | 0.8633 | 0.8437 |
+| + top 96 | 864 | 0.8644 | 0.8452 |
+| + top 128 | 896 | **0.8649** | **0.8454** |
+| + top 192 | 960 | 0.8624 | 0.8424 |
+| + all 966 | 1,734 | 0.8557 | 0.8378 |
+
+The top-128 validation gain is only 0.06 points, below the repeated-head noise floor, and the full pool overfits. Basketball/tennis errors fall from 24 to 21 but church/palace stays at 33, so this pool fails the validation gate and is not propagated into the union head. With the generic residual hidden-unit, hinge, transform, support-search, and additional-view levers all closed, the stable result of this continuation is the 3,884-value operating point above.
+
 
 Reproduce with:
 
@@ -1555,11 +1592,55 @@ python experiments/resisc45_union_variants.py --pool-suffix c224 --quotas q384/1
   --offsets 0 16 --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 --out experiments/resisc45_union_jitter_c224_budget.csv
 python experiments/resisc45_union_variants.py --pool-suffix j16 --quotas q384/128/128/96 --budgets 1024 1536 2048 2560 3072 \
   --offsets 0 16 --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 --out experiments/resisc45_union_jitter_j16_budget.csv
+python experiments/resisc45_union_variants.py --pool-suffix j16 --quotas q384/128/128/96 \
+  --budgets 3840 4052 --offsets 0 16 32 48 --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 \
+  --out experiments/resisc45_union_j16_cap_q96.csv
+python experiments/resisc45_union_variants.py --pool-suffix j16 --quotas q384/128/128/128 \
+  --budgets 3840 4052 --offsets 0 16 32 48 --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 \
+  --out experiments/resisc45_union_j16_cap_q128.csv
+python experiments/resisc45_jitter_pools.py --family c224 --crop-shift 1 --name c224s1
+python experiments/resisc45_jitter_pools.py --family c224 --crop-shift 2 --name c224s2
+python experiments/resisc45_jitter_pools.py --family c224 --crop-shift 3 --name c224s3
+python experiments/resisc45_jitter_pools.py --family c224 --crop-shift 4 --name c224s4
+python experiments/resisc45_jitter_pools.py --average c224 c224s1 --name crop16
+python experiments/resisc45_jitter_pools.py --average d8 c224 c224s1 --name j24
+python experiments/resisc45_jitter_pools.py --average c224 c224s1 c224s2 --name crop24
+python experiments/resisc45_jitter_pools.py --average d8 c224 c224s1 c224s2 --name j32crop
+python experiments/resisc45_jitter_pools.py --average c224 c224s1 c224s2 c224s3 --name crop32
+python experiments/resisc45_jitter_pools.py --average d8 c224 c224s1 c224s2 c224s3 --name j40crop
+python experiments/resisc45_jitter_pools.py --average c224 c224s1 c224s2 c224s3 c224s4 --name crop40
+python experiments/resisc45_jitter_pools.py --average d8 c224 c224s1 c224s2 c224s3 c224s4 --name j48crop
+python experiments/resisc45_jitter_ceiling.py --simple --skip-merged --families c224 c224s1 crop16 j24 \
+  --out experiments/resisc45_multicrop_ceiling_result.csv \
+  --pairs experiments/resisc45_multicrop_ceiling_pairs.csv
+python experiments/resisc45_jitter_ceiling.py --simple --skip-merged --families crop24 j32crop crop32 j40crop \
+  --out experiments/resisc45_multicrop_progressive_result.csv \
+  --pairs experiments/resisc45_multicrop_progressive_pairs.csv
+python experiments/resisc45_jitter_ceiling.py --simple --skip-merged --families crop40 j48crop \
+  --out experiments/resisc45_multicrop_stop_result.csv \
+  --pairs experiments/resisc45_multicrop_stop_pairs.csv
+python experiments/resisc45_union_variants.py --pool-suffix j32crop \
+  --quotas q384/128/128/96 q384/128/128/128 --budgets 3840 --offsets 0 16 32 48 \
+  --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 --out experiments/resisc45_union_j32crop_own.csv
+python experiments/resisc45_union_variants.py --pool-suffix j32crop --rank-pool-suffix d8 \
+  --quotas q384/128/128/96 q384/128/128/128 --budgets 3840 --offsets 0 16 32 48 \
+  --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 --out experiments/resisc45_union_j32crop_d8rank.csv
+python experiments/resisc45_union_variants.py --pool-suffix j32crop --rank-pool-suffix d8 \
+  --quotas q384/128/128/128 --budgets 4052 --offsets 0 16 32 48 \
+  --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 --out experiments/resisc45_union_j32crop_4096.csv
+python experiments/resisc45_gpu_features7.py
+python experiments/resisc45_dihedral_pools.py --pools gpu7_pool
+python experiments/resisc45_jitter_pools.py --family c224 --pools gpu7_pool
+python experiments/resisc45_jitter_pools.py --family c224 --crop-shift 1 --name c224s1 --pools gpu7_pool
+python experiments/resisc45_jitter_pools.py --family c224 --crop-shift 2 --name c224s2 --pools gpu7_pool
+python experiments/resisc45_jitter_pools.py --average d8 c224 c224s1 c224s2 --name j32crop --pools gpu7_pool
+python experiments/resisc45_pool7_ceiling.py
+python experiments/resisc45_exact_cap.py
 ```
 
 The union table's replicate, low-budget, prune-variant, control and high-budget rows are the same command with `--seed-offset 16 --union-seeds 4 8 16`, `--budgets 2048 2560 --union-seeds 8`, `--prune-rounds 6` or `--prune-c 0.03`, `--union-seeds 1 4 --search-scale 2` or `4`, and `--budgets 3840 4032`; they are merged into the one CSV.
 
-Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv`, `experiments/resisc45_search_decay_union.csv` `experiments/resisc45_union_variants_{quota,subsample,mixed,union2,cgrid,cgrid_prune01}.csv`, `experiments/resisc45_pool5_ceiling_result.csv`, `experiments/resisc45_pool5_ceiling_pairs.csv` `experiments/resisc45_union_pool5_{a,b,budget_a,budget_b}.csv`, `experiments/resisc45_pool6_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_pool6.csv`, `experiments/resisc45_dihedral_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_d8_{a,budget,budget_low}.csv`, `experiments/resisc45_transform_ceiling_{result,pairs,probe}.csv`, `experiments/resisc45_union_transform_{sqrt,pickskew}.csv`, `experiments/resisc45_hidden_units_result.csv`, `experiments/resisc45_union_hinge.csv`, `experiments/resisc45_jitter_ceiling_{result,pairs}.csv` (with the crop-only first pass in `resisc45_jitter_ceiling_c224{,_pairs}.csv`) and `experiments/resisc45_union_jitter_{c224,j16,c224_budget,j16_budget}.csv` (the fifth and sixth pools are cached as `data/cache/resisc45_{split}_gpu5_pool.npy` and `_gpu6_pool.npy` with their `_names.txt`, the dihedral-averaged pools as `data/cache/resisc45_{split}_gpu{,2,3,4,5}d8_pool.npy`, the crop, 192 and 320 families as `..._gpu{,2,3,4,5}{c224,s192,s320}_pool.npy` and the 16-view mean of the dihedral and crop families as `..._gpu{,2,3,4,5}j16_pool.npy`, and `experiments/resisc45_union_failures_{classes,pairs}.csv` hold the per-class and per-pair confusions of the incumbent head that the fifth pool was designed from); the whole section is about 200 GPU-minutes.
+Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv`, `experiments/resisc45_search_decay_union.csv` `experiments/resisc45_union_variants_{quota,subsample,mixed,union2,cgrid,cgrid_prune01}.csv`, `experiments/resisc45_pool5_ceiling_result.csv`, `experiments/resisc45_pool5_ceiling_pairs.csv` `experiments/resisc45_union_pool5_{a,b,budget_a,budget_b}.csv`, `experiments/resisc45_pool6_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_pool6.csv`, `experiments/resisc45_dihedral_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_d8_{a,budget,budget_low}.csv`, `experiments/resisc45_transform_ceiling_{result,pairs,probe}.csv`, `experiments/resisc45_union_transform_{sqrt,pickskew}.csv`, `experiments/resisc45_hidden_units_result.csv`, `experiments/resisc45_union_hinge.csv`, `experiments/resisc45_jitter_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_jitter_{c224,j16,c224_budget,j16_budget}.csv`, `experiments/resisc45_exact_cap_result.csv`, `experiments/resisc45_multicrop_{ceiling,progressive,stop}_{result,pairs}.csv`, `experiments/resisc45_union_j{16_cap,j32crop}*.csv`, and `experiments/resisc45_pool7_ceiling_{result,pairs}.csv`. The fifth, sixth, and seventh pools are cached as `data/cache/resisc45_{split}_gpu{5,6,7}_pool.npy`; progressive crop and mixed-view means are cached under their family suffixes through `j48crop`. The whole section now represents roughly 300 GPU-minutes.
 
 ## Image-statistics baseline
 
