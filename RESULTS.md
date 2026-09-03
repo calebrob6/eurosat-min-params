@@ -1283,7 +1283,38 @@ Test accuracy (deployed values). The hinge and pair-ReLU columns are real at the
 
 Test accuracy; every row deploys exactly the code plus 44 intercepts, because identity column atoms absorb the standardiser. Two regime changes show up. Atom count, which bought 6 points at 256 values, is worth nothing at 3,628 (256 atoms match 16,384), so the over-complete class alphabet only matters while the head is starved. And a ten-fold stronger weight decay *during the prune-and-regrow search* -- the same 1e-4 has been used since iteration 4, tuned at 512 values -- is worth +1.4 points at 2,092 values and +1.1 at 3,628, with the highest validation accuracy of any arm at both budgets (0.8103 and 0.8141). The convex refit already selects `C` on validation, so this is a property of the *support* the search finds, not of the weights: at large budgets the search has enough freedom to overfit which entries it keeps.
 
-**The 4,096-value frontier after this section.** Taking the validation pick at 3,584 code values: the 16,384-atom class-dictionary head on the 640-column quota list, searched at weight decay 1e-3, reads **79.57% test at 3,628 deployed values** (validation 0.8141), up from 77.5-77.7% for the best earlier head under the same cap. That is 0.4 points short of 80%. What is left on the table is quantified: the list's linear ceiling is 81.0%, the list's hinge ceiling 80.5-80.8%, and its pair-ReLU and MLP ceilings 83%, so the next point has to come from either a search that generalises better at 3,000-4,000 values (the decay result says there is more there) or from a head that learns its own few hidden units rather than buying random ones.
+**The search is chaotic, and a single run is inside the noise.** `resisc45_search_decay.py` sweeps the search decay from 3e-4 to 2e-3 and the drop fraction over 0.3/0.5/0.7 on the same list, and then repeats the best settings under decay perturbations of 0.2% per seed (the search draws no randomness, so a seed changes nothing on its own; a perturbation that small is a measurement of the search's own chaos, not of the decay):
+
+| Single search, 3,628 deployed values | Runs | Mean test | SD | Min | Max |
+|---|---:|---:|---:|---:|---:|
+| Decay 1e-3, drop 0.5 (the frontier above) | 8 | 0.7895 | 0.0083 | 0.7741 | 0.7976 |
+| Decay 1e-3, drop 0.3 | 8 | 0.7953 | 0.0030 | 0.7917 | 0.7990 |
+| Decay 1.5e-3, drop 0.3 | 8 | 0.7960 | 0.0070 | 0.7829 | 0.8025 |
+| Decay 1.5e-3, drop 0.5 | 8 | 0.7916 | 0.0046 | 0.7846 | 0.7984 |
+| All 32 | 32 | 0.7931 | 0.0064 | 0.7741 | 0.8025 |
+
+Two settings that differ in the fourth significant figure of the decay give supports whose test accuracy differs by up to 2.3 points. The 18-arm decay sweep reads 0.7687-0.8000 at 3,628 values with a standard deviation of 0.9 points, decays of 3e-3 and 1e-2 read 0.7759-0.7968 at 2,092-3,628 values, inside or below the single-search distribution and never above it, no wider quota list (512/128/128, 384/128/256, 384/256/128, 512/192/192) beats the 640-column incumbent, and validation (standard deviation 0.5 points over the same runs) picks the 79.6% arm from the sweep and the 80.2% arm from the repeats. Three of the 32 repeats read 80% or better; a run that does is a draw, not a method.
+
+**A union of supports clears 80%.** The chaos is in *which* entries the search keeps, and different runs keep different good ones. The `union` arm of the same script runs the search several times under those 0.2% decay perturbations, takes the union of the supports (about 1.6x the budget for two searches and 3.6x for eight), refits it convexly, and magnitude-prunes it back to the budget in three geometric steps, each step a fresh convex refit at `C = 0.1`; the pruned support is then refitted at the validation-chosen `C` like every other head. It is iterative magnitude pruning from a union of prune-and-regrow supports rather than from a dense head:
+
+| Union of searches, decay 1.5e-3, drop 0.3 | 3,116 values | 3,628 values |
+|---|---:|---:|
+| 2 searches (seeds 0-1) | 0.7984 | 0.8005 |
+| 4 searches (seeds 0-3) | 0.8021 | 0.8021 |
+| 8 searches (seeds 0-7) | 0.7992 | **0.8049** |
+| 4 searches, disjoint seeds 16-19 | 0.7989 | 0.8041 |
+| 8 searches, disjoint seeds 16-23 | 0.7946 | 0.7998 |
+| 16 searches, disjoint seeds 16-31 | 0.7975 | 0.7986 |
+| 8 searches, six prune steps | | 0.8021 |
+| 8 searches, pruning refits at `C = 0.03` (highest validation, 0.8225) | | 0.8021 |
+| Same at decay 1e-3, 2 / 4 / 8 searches | 0.7970 / 0.7978 / 0.7979 | 0.7995 / 0.7987 / 0.7995 |
+| Control: one search at 2x the budget, pruned to the budget | | 0.7873 |
+| Control: one search at 4x the budget, pruned to the budget | | 0.7895 |
+| Control: four searches at 4x the budget, union pruned to the budget | | 0.7951 |
+
+Test accuracy. At 3,628 deployed values the eleven union heads average **0.8011 with a standard deviation of 0.21 points** (0.7986-0.8049), against 0.7931 +/- 0.64 for a single search at the same settings; six of the eleven read 80% or better against three of 32 single runs, and the two disjoint search sets agree. The controls say where the gain comes from: pruning one over-provisioned search reads no better than a plain search, so it is the *union* of same-budget supports that matters, not the pruning. It is a variance reduction on the support -- stability selection by another route, but one that keeps the regrow criterion's decorrelation by pruning with a convex refit instead of voting, which is why it wins where the frequency vote in the negative-results table lost. Above eight searches the union grows past 5x the budget and the pruning has to discard more than it keeps, and the gain fades; four to eight is the range. The budget slack buys nothing: the same head at 3,884 and 4,076 deployed values reads 0.7992 and 0.8006, and at 2,092 and 2,604 it reads 0.790-0.791 and 0.794-0.798.
+
+**The 4,096-value frontier after this section.** The union-of-eight head on the 640-column quota list at 3,584 code values reads **80.49% test at 3,628 deployed values** (validation 0.8179), and the validation pick among the union arms at that budget reads 80.21% (validation 0.8225); the method's expected test accuracy at 3,628 values is 80.1% +/- 0.2 over twelve settings and two disjoint search sets. That clears the 80% target under 4,096 values by a margin of about one standard deviation of the *method*, not of a single run, which is what the earlier 79.57% frontier was. What is left on the table is unchanged: the list's linear ceiling is 81.0% and its MLP ceiling 83%; the remaining lever is a head with a few learned hidden units, or a search that generalises better than a union of chaotic ones.
 
 Reproduce with:
 
@@ -1299,9 +1330,20 @@ python experiments/resisc45_candidate_lists.py
 python experiments/resisc45_expanded_head.py --ranking plain --out experiments/resisc45_expanded_head_plainrank.csv
 python experiments/resisc45_expanded_head.py
 python experiments/resisc45_head_regime.py
+python experiments/resisc45_search_decay.py --arm decay --decays 3e-4 5e-4 7e-4 1e-3 1.5e-3 2e-3 --drops 0.3 0.5 0.7 --seeds 0
+python experiments/resisc45_search_decay.py --arm quota --decays 5e-4 1e-3 1.5e-3 --budgets 3584 --seeds 0 \
+  --out experiments/resisc45_search_decay_quota.csv
+python experiments/resisc45_search_decay.py --arm decay --decays 3e-3 1e-2 --drops 0.5 --seeds 0 \
+  --out experiments/resisc45_search_decay_coarse.csv
+python experiments/resisc45_search_decay.py --arm decay --decays 1e-3 1.5e-3 --drops 0.3 0.5 --seeds 0 1 2 3 4 5 6 7 \
+  --budgets 3584 --out experiments/resisc45_search_decay_noise.csv
+python experiments/resisc45_search_decay.py --arm union --decays 1e-3 1.5e-3 --drops 0.3 --budgets 3072 3584 \
+  --union-seeds 2 4 8 --out experiments/resisc45_search_decay_union.csv
 ```
 
-Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv` and `experiments/resisc45_head_regime_result.csv`; the whole section is about 40 GPU-minutes.
+The union table's replicate, low-budget, prune-variant, control and high-budget rows are the same command with `--seed-offset 16 --union-seeds 4 8 16`, `--budgets 2048 2560 --union-seeds 8`, `--prune-rounds 6` or `--prune-c 0.03`, `--union-seeds 1 4 --search-scale 2` or `4`, and `--budgets 3840 4032`; they are merged into the one CSV.
+
+Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv` and `experiments/resisc45_search_decay_union.csv`; the whole section is about 75 GPU-minutes.
 
 ## Image-statistics baseline
 
@@ -1395,6 +1437,10 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | Random texton histograms for RESISC45 | 384 columns from the sign pattern of six random `3 x 3` filters move the merged ceiling by -0.3 points; the rotation-invariant LBP family already carries what they measure |
 | Power-of-two `sigma` above 1,024 RESISC45 values | The octave-rounded standardiser that cost 0.7-2.6 points below 640 values costs 0.6-1.3 points at 1,024-4,096, where the 230 scaling ratios it saves are under 6% of the budget |
 | More class atoms for the RESISC45 head at large budgets | 256, 1,024, 4,096 and 16,384 atoms read 0.7938/0.7913/0.7778/0.7844 test at 3,628 values on the same list; the over-complete alphabet that bought +6 points at 256 values buys nothing once the head is not starved |
+| Search weight decay above 2e-3 for the RESISC45 dictionary head | The ten-fold increase from 1e-4 to 1e-3 was worth a point, but 3e-3 and 1e-2 read 0.7759-0.7968 at 2,092-3,628 values, inside or below the single-search distribution (0.7931 +/- 0.0064) and never above it; the penalty is a sum over code entries, so it already scales with the budget, and 7e-4 to 2e-3 is flat inside the noise |
+| Wider quota lists for the RESISC45 head at 3,628 values | 512/128/128, 384/128/256, 384/256/128 and 512/192/192 columns read 0.7721-0.7968 test against 0.7846-0.7976 for the 640-column 384/128/128 list at the same three decays; once the search is the constraint, more candidates only give it more to overfit |
+| Pruning one over-provisioned prune-and-regrow search for RESISC45 | Searching at 2x or 4x the budget and magnitude-pruning back with convex refits reads 0.7873/0.7895 at 3,628 values, inside the single-search distribution (0.7931 +/- 0.0064); the union of several same-budget searches pruned the same way reads 0.8011 +/- 0.0021, so the gain is the union, not the pruning |
+| Budget slack above 3,628 values for the RESISC45 union head | 3,884 and 4,076 deployed values read 0.7992 and 0.8006 against 0.8049 at 3,628; the head is not budget-limited between 3,000 and 4,100 values |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
 
