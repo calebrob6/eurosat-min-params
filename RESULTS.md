@@ -1314,7 +1314,27 @@ Two settings that differ in the fourth significant figure of the decay give supp
 
 Test accuracy. At 3,628 deployed values the eleven union heads average **0.8011 with a standard deviation of 0.21 points** (0.7986-0.8049), against 0.7931 +/- 0.64 for a single search at the same settings; six of the eleven read 80% or better against three of 32 single runs, and the two disjoint search sets agree. The controls say where the gain comes from: pruning one over-provisioned search reads no better than a plain search, so it is the *union* of same-budget supports that matters, not the pruning. It is a variance reduction on the support -- stability selection by another route, but one that keeps the regrow criterion's decorrelation by pruning with a convex refit instead of voting, which is why it wins where the frequency vote in the negative-results table lost. Above eight searches the union grows past 5x the budget and the pruning has to discard more than it keeps, and the gain fades; four to eight is the range. The budget slack buys nothing: the same head at 3,884 and 4,076 deployed values reads 0.7992 and 0.8006, and at 2,092 and 2,604 it reads 0.790-0.791 and 0.794-0.798.
 
-**The 4,096-value frontier after this section.** The union-of-eight head on the 640-column quota list at 3,584 code values reads **80.49% test at 3,628 deployed values** (validation 0.8179), and the validation pick among the union arms at that budget reads 80.21% (validation 0.8225); the method's expected test accuracy at 3,628 values is 80.1% +/- 0.2 over twelve settings and two disjoint search sets. That clears the 80% target under 4,096 values by a margin of about one standard deviation of the *method*, not of a single run, which is what the earlier 79.57% frontier was. What is left on the table is unchanged: the list's linear ceiling is 81.0% and its MLP ceiling 83%; the remaining lever is a head with a few learned hidden units, or a search that generalises better than a union of chaotic ones.
+**Nothing else moves the union head.** `resisc45_union_variants.py` re-reads the remaining knobs under the union head itself rather than under single searches, with two disjoint search sets (seeds 0-7 and 16-23) per setting; eight searches, decay 1.5e-3, drop 0.3, 3,584 code values throughout:
+
+| Union head at 3,628 values | Seeds 0-7 | Seeds 16-23 | Union entries |
+|---|---:|---:|---:|
+| Incumbent: 640-column 384/128/128 list, decay-perturbed searches | **0.8049** | 0.7998 | 12.9k / 13.1k |
+| 512/128/128 list (768 columns) | 0.7954 | 0.7937 | 10.9k / 10.7k |
+| 384/128/256 list (768 columns) | 0.7843 | 0.7913 | 9.6k / 13.7k |
+| 384/256/128 list (768 columns) | 0.7954 | 0.7957 | 12.1k / 12.9k |
+| 512/192/192 list (896 columns) | 0.7930 | 0.7954 | 9.7k / 10.1k |
+| 256/128/128 list (512 columns) | 0.7973 | 0.7946 | 10.8k / 11.0k |
+| Diversity from a 50% training subsample per search instead of the decay | 0.7968 | 0.7946 | 21.3k / 20.9k |
+| Same, 70% subsample | 0.7952 | 0.7987 | 19.2k / 19.4k |
+| Same, 85% subsample | 0.8005 | 0.7965 | 17.5k / 17.7k |
+| Diversity from mixed settings (drops 0.2/0.3/0.4/0.5 x decays 1e-3/1.5e-3) | 0.8003 | 0.7987 | 17.1k / 16.6k |
+| Union of four union heads (32 searches, each group pruned first), pruned again | 0.8010 | 0.7994 | 8.9k / 8.7k |
+| Incumbent, refit grid extended down to `C = 0.003` (validation picks 0.01 / 0.03) | 0.7995 | 0.7998 | 12.9k / 13.1k |
+| Incumbent, pruning refits at `C = 0.01`, same extended grid | 0.8006 | 0.7970 | 12.9k / 13.1k |
+
+Test accuracy. Every variant reads 0.784-0.801, and the ones near 0.80 are the incumbent's own distribution (0.8011 +/- 0.0021). The quota comparison is now readable and confirms the 640-column list: every wider list loses 0.5-2 points under the union head just as it did under single searches, and the 512-column list loses 0.5, so the list is neither too wide nor too narrow. The diversity source matters only through the size of the union it produces: subsampled searches and mixed settings disagree with each other more (unions of 17-21k entries against 13k), the pruning has to discard more than it keeps, and the mean slips by a few tenths; the two-level union of 32 searches (8.9k entries after each group's own pruning) reads the incumbent's mean exactly. The refit grid is the one caveat that changes a number already quoted: every union row picks `C = 0.03`, the bottom of the default grid, and extending the grid to 0.003 makes validation pick 0.01 on the incumbent's own support (validation 0.8195 against 0.8179), where the same support reads 0.7995 test. The 80.49% reading therefore contains a favourable `C` draw of about half a point. However it is set, the method reads 80.0% +/- 0.2 at 3,628 values, and on this list at this budget it is at a plateau that no diversity source, list, pruning `C` or refit `C` moves.
+
+**The 4,096-value frontier after this section.** The union-of-eight head on the 640-column quota list at 3,584 code values reads **80.49% test at 3,628 deployed values** (validation 0.8179), and the validation pick among the union arms at that budget reads 80.21% (validation 0.8225); the method's expected test accuracy at 3,628 values is 80.1% +/- 0.2 over twelve settings and two disjoint search sets. That clears the 80% target under 4,096 values by a margin of about one standard deviation of the *method*, not of a single run, which is what the earlier 79.57% frontier was; with the refit grid extended below `C = 0.03` the same support's validation pick reads 79.95%, so the honest statement is that the method's expected test accuracy at 3,628 values is 80.0-80.1% and 80.49% is the top of its distribution. The variants table says the plateau is real: the list, the diversity source, the pruning `C` and the refit `C` all leave it where it is. What is left on the table is unchanged: the list's linear ceiling is 81.0% and its MLP ceiling 83%, and the union head sits 0.9 points under the linear ceiling with an eighth of its values; the remaining lever is a head with a few learned hidden units, or new columns that lift the list's own ceiling, not another way of searching the same list.
 
 Reproduce with:
 
@@ -1339,11 +1359,19 @@ python experiments/resisc45_search_decay.py --arm decay --decays 1e-3 1.5e-3 --d
   --budgets 3584 --out experiments/resisc45_search_decay_noise.csv
 python experiments/resisc45_search_decay.py --arm union --decays 1e-3 1.5e-3 --drops 0.3 --budgets 3072 3584 \
   --union-seeds 2 4 8 --out experiments/resisc45_search_decay_union.csv
+python experiments/resisc45_union_variants.py --arm quota --out experiments/resisc45_union_variants_quota.csv
+python experiments/resisc45_union_variants.py --arm subsample --out experiments/resisc45_union_variants_subsample.csv
+python experiments/resisc45_union_variants.py --arm mixed --out experiments/resisc45_union_variants_mixed.csv
+python experiments/resisc45_union_variants.py --arm union2 --out experiments/resisc45_union_variants_union2.csv
+python experiments/resisc45_union_variants.py --arm quota --quotas q384/128/128 --c-grid 0.003 0.01 0.03 0.1 0.3 \
+  --out experiments/resisc45_union_variants_cgrid.csv
+python experiments/resisc45_union_variants.py --arm quota --quotas q384/128/128 --prune-c 0.01 \
+  --c-grid 0.003 0.01 0.03 0.1 0.3 --out experiments/resisc45_union_variants_cgrid_prune01.csv
 ```
 
 The union table's replicate, low-budget, prune-variant, control and high-budget rows are the same command with `--seed-offset 16 --union-seeds 4 8 16`, `--budgets 2048 2560 --union-seeds 8`, `--prune-rounds 6` or `--prune-c 0.03`, `--union-seeds 1 4 --search-scale 2` or `4`, and `--budgets 3840 4032`; they are merged into the one CSV.
 
-Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv` and `experiments/resisc45_search_decay_union.csv`; the whole section is about 75 GPU-minutes.
+Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv`, `experiments/resisc45_search_decay_union.csv` and `experiments/resisc45_union_variants_{quota,subsample,mixed,union2,cgrid,cgrid_prune01}.csv`; the whole section is about 90 GPU-minutes.
 
 ## Image-statistics baseline
 
@@ -1441,6 +1469,9 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | Wider quota lists for the RESISC45 head at 3,628 values | 512/128/128, 384/128/256, 384/256/128 and 512/192/192 columns read 0.7721-0.7968 test against 0.7846-0.7976 for the 640-column 384/128/128 list at the same three decays; once the search is the constraint, more candidates only give it more to overfit |
 | Pruning one over-provisioned prune-and-regrow search for RESISC45 | Searching at 2x or 4x the budget and magnitude-pruning back with convex refits reads 0.7873/0.7895 at 3,628 values, inside the single-search distribution (0.7931 +/- 0.0064); the union of several same-budget searches pruned the same way reads 0.8011 +/- 0.0021, so the gain is the union, not the pruning |
 | Budget slack above 3,628 values for the RESISC45 union head | 3,884 and 4,076 deployed values read 0.7992 and 0.8006 against 0.8049 at 3,628; the head is not budget-limited between 3,000 and 4,100 values |
+| Other quota lists under the RESISC45 union head | Read with two disjoint search sets each, the 512/128/128, 384/128/256, 384/256/128, 512/192/192 and 256/128/128 lists read 0.7843-0.7973 at 3,628 values against 0.7998/0.8049 for the 640-column 384/128/128 list; the single-search quota comparison was inside the noise, this one is not, and it says the same thing |
+| Diversity sources other than the 0.2% decay perturbation for the union head | Training subsamples of 50/70/85% per search, mixed drop/decay settings, and a union of four already-pruned union heads (32 searches) read 0.7946-0.8010 at 3,628 values, the incumbent's own distribution; the larger unions they produce (17-21k entries against 13k) cost a few tenths and the smaller one (8.9k) gains nothing |
+| Refit or pruning `C` below 0.03 for the union head | Extending the refit grid to 0.003 makes validation pick 0.01 on the incumbent support and drops its test reading from 0.8049 to 0.7995 (validation 0.8195 against 0.8179); pruning refits at 0.01 read 0.8006/0.7970; the method is 80.0% +/- 0.2 at 3,628 values whichever way `C` is set |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
 
