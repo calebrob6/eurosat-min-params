@@ -111,6 +111,9 @@ def main() -> None:
     parser.add_argument('--c-grid', type=float, nargs='*', default=None,
                         help='refit C grid for the final validation pick (the union rows all '
                              'chose 0.03, the edge of the default grid)')
+    parser.add_argument('--extra-pool', default='gpu5_pool',
+                        help='fourth quota block; a quota name with four parts '
+                             '(q384/128/128/64) admits its top columns')
     parser.add_argument('--out', default=RESULT_PATH)
     args = parser.parse_args()
     if args.c_grid:
@@ -120,7 +123,8 @@ def main() -> None:
     base, y, _ = load_pools(BASE_POOLS)
     layout, _, _ = load_pools((LAYOUT_POOL,))
     new, _, _ = load_pools(('gpu4_pool',))
-    blocks = (base, layout, new)
+    extra, _, _ = load_pools((args.extra_pool,))
+    blocks = (base, layout, new, extra)
     orders = [group_lasso_rank(b['train'], y['train'], lam=LAM, epochs=1500)[0] for b in blocks]
 
     def build(quota):
@@ -139,7 +143,8 @@ def main() -> None:
     cache, rows = {}, []
     for qname, fraction, budget, offset in settings:
         if qname not in cache:
-            cache[qname] = build(QUOTAS[qname])
+            quota = QUOTAS.get(qname) or tuple(int(q) for q in qname.lstrip('q').split('/'))
+            cache[qname] = build(quota)
         x = cache[qname]
         fdict = np.eye(x['train'].shape[1])
         t0 = time.time()
