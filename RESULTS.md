@@ -1209,6 +1209,100 @@ re-prints the price list, the equal-code tables, the intercept re-coding, the
 convergence table and the honest frontier from the existing CSV.
 
 
+## Towards 80% under 4,096 values: the headroom map and where the budget goes
+
+The sections above chase the *smallest* head that clears 65% and 70%. The next target is the opposite corner: **80% test under 4,096 deployed values**. The pool's own linear ceiling is 79.4% test, so no head on the existing columns can get there, and the first job is to find out what is missing -- information, nonlinearity, or head capacity -- and how much of each a budgeted head can buy. `experiments/resisc45_budget4096.py`, `resisc45_nonlinear_probe.py`, `resisc45_gpu_features4.py`, `resisc45_pool4_ceiling.py`, `resisc45_candidate_lists.py`, `resisc45_expanded_head.py` and `resisc45_head_regime.py` answer that in turn. Every arm is fitted on train with `C`, weight decay and the head structure chosen on validation and test read once; deployed values follow the accounting of "The standardiser was never free".
+
+**Where the existing heads stand at 4,096.** Extending the earlier frontiers past 1,024 values, the incumbent pair-dictionary head reads 77.7% test at 4,385 deployed values (4,096 code values plus the intercept and 245 scaling ratios), and the class-dictionary head over the 512-column list reads 77.5% at exactly 4,096. Both are 2.5 points short of the target and within two points of the linear ceiling, so a better head on the same columns cannot close the gap.
+
+| Head | 1,024 | 2,048 | 4,096 |
+|---|---:|---:|---:|
+| Element-wise prune-and-regrow, whole 2,084-column pool | 0.7211 | 0.7435 | 0.7652 |
+| Class dictionary (16,384 atoms), whole pool | 0.7408 | 0.7471 | 0.7490 |
+| Class dictionary (16,384 atoms), 512-column list | 0.7595 | 0.7673 | 0.7754 |
+| Pair dictionary over the 512-column list, `zscore/pairs256/free` | 0.7600 (1,303) | 0.7700 (2,333) | 0.7768 (4,385) |
+| Same with power-of-two `sigma`, `zbuck/pairs256/free` | 0.7497 (1,082) | 0.7641 (2,106) | 0.7640 (4,152) |
+| Dense affine head, whole pool (91,740 values) | | | 0.7935 |
+
+Test accuracy; deployed values in brackets where they differ from the column. The power-of-two `sigma` that was almost free below 640 values costs 0.6-1.3 points here, so the standardiser saving does not carry to large budgets.
+
+**The pool is hiding nonlinear information from a linear head.** A one-hidden-layer ReLU head on the same 2,084 columns reads 82.6% test at width 1,024, three points above the linear ceiling. `resisc45_nonlinear_probe.py` asks which *zero-parameter* expansion of the columns recovers that, because an expansion is just more columns and the sparse machinery can then buy the ones it wants:
+
+| Expansion of the pool | Columns | Validation | Test |
+|---|---:|---:|---:|
+| Linear (control) | 2,084 | 0.8125 | 0.7935 |
+| Hinge at the column mean, `[z, relu(z)]` | 4,168 | 0.8230 | 0.8102 |
+| Hinges at `z = -1, 0, 1` | 8,336 | 0.8244 | 0.8127 |
+| ReLU of 4,096 random signed column pairs | 6,180 | 0.8335 | 0.8217 |
+| ReLU of 16,384 random signed column pairs | 18,468 | 0.8406 | 0.8268 |
+| ReLU MLP, width 16 / 32 / 64 / 128 / 512 | 2,084 | 0.7692 / 0.7959 / 0.8162 / 0.8263 / 0.8392 | 0.7525 / 0.7844 / 0.8016 / 0.8108 / 0.8267 |
+
+Two things follow. A single hinge at each column's mean -- the response `|z|` in effect -- is worth 1.7 test points on its own and the extra knots almost nothing, so most of the additive nonlinearity is "distance from the typical value". And ReLUs of random *pairs* of standardised columns match the widest MLP with no learned first layer at all: the interaction information is width-2, exactly as it was on the linear head in "A column dictionary too". The same probe restricted to the 512-column candidate list reads 79.8% linear, 80.5% hinged, 83.0% with 16,384 pair ReLUs and 83.2% with a width-512 MLP, so the nonlinear headroom is inside the columns the budgeted heads already read.
+
+**A fourth pool: random local features and colour-conditioned texture.** Every column so far is a global statistic of a hand-designed map. `resisc45_gpu_features4.py` adds 2,042 columns that summarise *which local patterns occur*: 1,536 MOSAIKS-style random convolutional features (128 seeded zero-mean `5 x 5 x 3` filters at three scales, ReLU on both signs, mean- and max-pooled), 384 random texton histograms (the sign pattern of six seeded `3 x 3` filters hashes each pixel into 64 codes), 66 colour-conditioned texture statistics (gradient energy, blob compactness, brightness and grid spread inside eleven fixed hue/grey masks) and 56 order statistics of `4 x 4` grid cells. All are deterministic given one seed, so the extractor still stores nothing; the whole pool extracts in about a GPU-minute.
+
+| Pool | Columns | Validation | Test |
+|---|---:|---:|---:|
+| Merged pool (control) | 2,084 | 0.8125 | 0.7935 |
+| + grid-cell order statistics | 2,140 | 0.8171 | 0.7960 |
+| + colour-conditioned texture | 2,150 | 0.8214 | 0.8029 |
+| + random convolutional features | 3,620 | 0.8176 | 0.8052 |
+| + random texton histograms | 2,468 | 0.8148 | 0.7902 |
+| + all four (merged + new) | 4,126 | 0.8254 | 0.8063 |
+| Fourth pool alone | 2,042 | 0.6911 | 0.6803 |
+| Hinge expansion of merged + new | 16,504 | 0.8359 | 0.8232 |
+| Width-256 ReLU MLP on merged + new | 4,126 | 0.8422 | 0.8249 |
+
+The new pool moves the linear ceiling from 79.4% to 80.6% test, with the random convolutional and colour-conditioned families carrying it and the texton histograms worth nothing. The colour-conditioned family is 66 columns for +0.9 points, the best per-column addition since the native-resolution rebuild; the random convolutional family is +1.2 points for 1,536 columns, each individually weak, which is the MOSAIKS shape recorded in the negative-results table.
+
+**A single ranking over the widened pool is the wrong candidate list.** Every earlier dictionary head reads a 512-column list ranked by group lasso. Re-ranking the 4,126-column pool the same way gives 163 of 512 slots to the texton histograms and 163 to the object-layout pool, and the list's linear ceiling drops from 79.8% (the incumbent list) to 76.8%; the dictionary head on it reads 74.6-75.0% at every budget, *below* the incumbent on the old pool. Ranking the nonlinearly expanded pool is worse still: the pair-ReLU columns take 480 of the 504 columns the head ends up using and it reads 71-74%. This is iteration 3's lesson again, a family that is individually strong and collectively redundant floods a per-column ranking, and the fix is the same: `resisc45_candidate_lists.py` builds a **quota list** of 384 base, 128 layout and 128 fourth-pool columns from three separate rankings, whose 640 columns read **81.0% test** linearly -- above the whole old pool.
+
+**What the head can buy.** `resisc45_expanded_head.py` fits the incumbent pair-dictionary head on the quota list and on three ways of admitting expanded columns, charging each hinge column its knot and each pair-ReLU column its ratio and offset on top of the base accounting:
+
+| Candidate list | Columns | ~1,300 | ~2,300 | ~3,400 | ~3,900 |
+|---|---:|---:|---:|---:|---:|
+| Quota list, raw columns | 640 | 0.7662 (1,294) | 0.7789 (2,326) | 0.7711 (3,351) | 0.7748 (3,866) |
+| Quota list plus hinge columns | 1,280 | 0.7595 (1,506) | 0.7662 (2,559) | 0.7756 (3,700) | 0.7790 (4,197) |
+| Support of an element-wise 2,048-value search over raw + hinge + 8,192 pair ReLUs | 1,745 | 0.7589 (2,352) | 0.7776 (3,912) | 0.7748 (5,034) | 0.7725 (5,376) |
+| Support of a 4,096-value search, same pool | 3,035 | 0.7613 (2,464) | 0.7722 (3,838) | 0.7803 (5,290) | 0.7775 (5,820) |
+| Element-wise head over the whole expanded pool | 9,472 | 0.7327 (2,807) | 0.7619 (5,374) | 0.7671 (7,728) | 0.7690 (8,854) |
+
+Test accuracy (deployed values). The hinge and pair-ReLU columns are real at the ceiling and useless under the budget: the head spends 221-341 knots and up to 1,900 pair constants for nothing, because it buys the expanded columns one at a time and their value is collective -- the dense head uses thousands of them at small weights, the same reason random convolutional features needed 4,617 head parameters on EuroSAT. The raw quota list is the only one that pays, and only up to about 2,300 values, after which the head plateaus at 77-78% while its own list has a linear ceiling of 81.0%. That plateau, not the pool, is now the binding constraint.
+
+**The plateau is the search, and its weight decay is the lever.** `resisc45_head_regime.py` holds the 640-column quota list fixed and varies only the head, reporting train accuracy next to test:
+
+| Head on the quota list | 1,068 values | 2,092 values | 3,628 values |
+|---|---:|---:|---:|
+| Dense affine (28,204 values) | | | 0.8102 (train 0.940) |
+| Element-wise prune-and-regrow over the list | 0.7344 | 0.7657 | 0.7849 |
+| Class dictionary, 256 atoms | 0.7489 | 0.7822 | 0.7938 |
+| Class dictionary, 1,024 atoms | 0.7643 | 0.7790 | 0.7913 |
+| Class dictionary, 4,096 atoms | 0.7659 | 0.7824 | 0.7778 |
+| Class dictionary, 16,384 atoms | 0.7698 | 0.7775 | 0.7844 |
+| Class dictionary, 16,384 atoms, search weight decay 1e-3 | 0.7667 | **0.7917** | **0.7957** |
+
+Test accuracy; every row deploys exactly the code plus 44 intercepts, because identity column atoms absorb the standardiser. Two regime changes show up. Atom count, which bought 6 points at 256 values, is worth nothing at 3,628 (256 atoms match 16,384), so the over-complete class alphabet only matters while the head is starved. And a ten-fold stronger weight decay *during the prune-and-regrow search* -- the same 1e-4 has been used since iteration 4, tuned at 512 values -- is worth +1.4 points at 2,092 values and +1.1 at 3,628, with the highest validation accuracy of any arm at both budgets (0.8103 and 0.8141). The convex refit already selects `C` on validation, so this is a property of the *support* the search finds, not of the weights: at large budgets the search has enough freedom to overfit which entries it keeps.
+
+**The 4,096-value frontier after this section.** Taking the validation pick at 3,584 code values: the 16,384-atom class-dictionary head on the 640-column quota list, searched at weight decay 1e-3, reads **79.57% test at 3,628 deployed values** (validation 0.8141), up from 77.5-77.7% for the best earlier head under the same cap. That is 0.4 points short of 80%. What is left on the table is quantified: the list's linear ceiling is 81.0%, the list's hinge ceiling 80.5-80.8%, and its pair-ReLU and MLP ceilings 83%, so the next point has to come from either a search that generalises better at 3,000-4,000 values (the decay result says there is more there) or from a head that learns its own few hidden units rather than buying random ones.
+
+Reproduce with:
+
+```bash
+python experiments/resisc45_budget4096.py
+python experiments/resisc45_standardiser.py --budgets 1024 2048 4096 \
+  --arms zscore/pairs256/free zbuck/pairs256/free --mp-arms \
+  --out experiments/resisc45_standardiser_4096.csv
+python experiments/resisc45_nonlinear_probe.py
+python experiments/resisc45_gpu_features4.py
+python experiments/resisc45_pool4_ceiling.py
+python experiments/resisc45_candidate_lists.py
+python experiments/resisc45_expanded_head.py --ranking plain --out experiments/resisc45_expanded_head_plainrank.csv
+python experiments/resisc45_expanded_head.py
+python experiments/resisc45_head_regime.py
+```
+
+Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv` and `experiments/resisc45_head_regime_result.csv`; the whole section is about 40 GPU-minutes.
+
 ## Image-statistics baseline
 
 The baseline computes four statistics independently for each band:
@@ -1296,6 +1390,11 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | Fitting the RESISC45 head on uncentred features | Dropping the centring removes the fold's 44-value deployed intercept at the source, but the prune-and-regrow search then collapses to 2-4% test at every budget: with a median `\|mu\| / sigma` of 3.4 the dense loss gradient at `w = 0` is dominated by the column means, which point in nearly the same class direction for every column, so the support fills with rank-1 mean structure. Centring is what makes the regrow criterion informative; the search has to see centred features even when the deployed head does not |
 | Sharing one `sigma` per feature family | Within-family standard deviations span up to 16.7 octaves in this pool, so a family-shared `sigma` reproduces the uncentred collapse exactly (3.98% test at 160 code values). Sharing per power-of-two octave works instead, because it bounds the distortion to `sqrt(2)` while still making within-octave pair atoms cost nothing |
 | Class singletons in the RESISC45 class dictionary | Prepending the 44 identity atoms to the Gaussian class dictionary, which makes a coded intercept able to reproduce a free one exactly, reads 0.6302 at 160 stored values and 0.6743 at 256 against 0.6290 and 0.6863 without them -- the same verdict on designed atoms the class-dictionary section reached |
+| Buying nonlinear columns one at a time for the RESISC45 head | Hinge-at-mean and random pair-ReLU expansions lift the pool's linear ceiling from 79.4% to 81.0% and 82.7% test, but a budgeted dictionary head that admits them reads no better than on raw columns at any budget up to 5,800 deployed values and pays 220-1,900 extra constants for the privilege; their value is collective (the dense head spreads small weights over thousands of them), which is the MOSAIKS shape again |
+| One group-lasso ranking over the widened 4,126-column RESISC45 pool | Floods the 512-column list with 163 random-texton and 163 object-layout columns, drops the list's linear ceiling from 79.8% to 76.8% test and the dictionary head to 74.6-75.0%; the quota list from three separate rankings reads 81.0% with 640 columns |
+| Random texton histograms for RESISC45 | 384 columns from the sign pattern of six random `3 x 3` filters move the merged ceiling by -0.3 points; the rotation-invariant LBP family already carries what they measure |
+| Power-of-two `sigma` above 1,024 RESISC45 values | The octave-rounded standardiser that cost 0.7-2.6 points below 640 values costs 0.6-1.3 points at 1,024-4,096, where the 230 scaling ratios it saves are under 6% of the budget |
+| More class atoms for the RESISC45 head at large budgets | 256, 1,024, 4,096 and 16,384 atoms read 0.7938/0.7913/0.7778/0.7844 test at 3,628 values on the same list; the over-complete alphabet that bought +6 points at 256 values buys nothing once the head is not starved |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
 
@@ -1329,8 +1428,15 @@ python experiments/resisc45_feature_dict.py
 python experiments/resisc45_coded_bias.py
 python experiments/resisc45_distill.py
 python experiments/resisc45_standardiser.py
+python experiments/resisc45_budget4096.py
+python experiments/resisc45_nonlinear_probe.py
+python experiments/resisc45_gpu_features4.py
+python experiments/resisc45_pool4_ceiling.py
+python experiments/resisc45_candidate_lists.py
+python experiments/resisc45_expanded_head.py
+python experiments/resisc45_head_regime.py
 python submissions/12_reference_class_linear/eval.py
 python submissions/13_reference_class_95/eval.py
 ```
 
-The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, the support-search probe writes `experiments/resisc45_support_probe_result.csv`, the class-dictionary head writes `experiments/resisc45_class_dict_result.csv`, the column-dictionary head writes `experiments/resisc45_feature_dict_result.csv`, the intercept comparison writes `experiments/resisc45_coded_bias_result.csv`, the distillation comparison writes `experiments/resisc45_distill_result.csv`, and the standardiser repricing writes `experiments/resisc45_standardiser_result.csv` (the single command above runs only the first of its nine passes; the full command list is in that section). Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.
+The baseline's complete `C` sweep and per-class test results are stored in `experiments/image_statistics_baseline_result.txt`. The selected-feature and ImageStats five-seed fraction results are stored in `experiments/eval_training_fractions_result.csv` and `experiments/eval_imagestats_fractions_result.csv`, including model metadata, split protocol, individual seed accuracies, mean, and sample standard deviation. The coordinate-only MLP screen and multi-seed frontier are stored in `experiments/coordinate_mlp_screen.csv` and `experiments/coordinate_mlp_result.csv`. The preliminary RESISC45 transfer, including exact selected feature indices and names, is stored in `experiments/resisc45_33_feature_fractions.csv`. The RESISC45 object-layout experiments write `experiments/resisc45_layout_gain_result.csv`, `experiments/resisc45_layout_gain_classes.csv`, `experiments/resisc45_layout_diagnose_result.csv`, and `experiments/resisc45_layout_frontier_result.csv`, the prune-and-regrow comparison writes `experiments/resisc45_rigl_result.csv`, the degree-2 product experiment writes `experiments/resisc45_quadratic_result.csv`, the support-search probe writes `experiments/resisc45_support_probe_result.csv`, the class-dictionary head writes `experiments/resisc45_class_dict_result.csv`, the column-dictionary head writes `experiments/resisc45_feature_dict_result.csv`, the intercept comparison writes `experiments/resisc45_coded_bias_result.csv`, the distillation comparison writes `experiments/resisc45_distill_result.csv`, the standardiser repricing writes `experiments/resisc45_standardiser_result.csv` (the single command above runs only the first of its nine passes; the full command list is in that section), and the 4,096-value headroom section writes `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_result.csv` and `experiments/resisc45_head_regime_result.csv`. Dataset download and fraction evaluators verify the official TorchGeo checksums. Submission evaluation scripts recompute features from raw patches rather than relying on cached feature matrices.

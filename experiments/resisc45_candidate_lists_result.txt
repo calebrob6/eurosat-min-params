@@ -1,0 +1,7 @@
+plain-ranked top 512 by family: layout 163, new:rtex 163, base 126, new:ctexblob 10, new:ctexpan 10, new:ctexspread 8, new:ctexgrad 8, new:cellbotgap 6, new:rconv 5, new:celltopgap 4, new:cellskew 3, new:ctexfrac 2, new:cellstd 2, new:cellrange 1, new:cellmin 1
+plain rank, top 512: 512 columns val 0.7932 test 0.7681 C=0.01
+plain rank, top 1024: 1024 columns val 0.8040 test 0.7808 C=0.01
+quota 384 base + 128 layout (incumbent list): 512 columns val 0.8189 test 0.7981 C=0.03
+quota 384 base + 128 layout + 128 new: 640 columns val 0.8340 test 0.8102 C=0.03
+quota 448 base + 128 layout + 64 new: 640 columns val 0.8265 test 0.8075 C=0.03
+whole 4,126-column pool: 4126 columns val 0.8257 test 0.8049 C=0.1
