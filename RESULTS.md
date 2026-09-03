@@ -1514,7 +1514,35 @@ Both larger means lose validation, so view expansion stops at j32crop. Re-rankin
 | + top 192 | 960 | 0.8624 | 0.8424 |
 | + all 966 | 1,734 | 0.8557 | 0.8378 |
 
-The top-128 validation gain is only 0.06 points, below the repeated-head noise floor, and the full pool overfits. Basketball/tennis errors fall from 24 to 21 but church/palace stays at 33, so this pool fails the validation gate and is not propagated into the union head. With the generic residual hidden-unit, hinge, transform, support-search, and additional-view levers all closed, the stable result of this continuation is the 3,884-value operating point above.
+The top-128 validation gain is only 0.06 points, below the repeated-head noise floor, and the full pool overfits. Basketball/tennis errors fall from 24 to 21 but church/palace stays at 33, so this pool fails the validation gate and is not propagated into the union head. With the generic residual hidden-unit, hinge, transform, support-search, and additional-view levers all closed, the stable independent-value sparse-head result is the 3,884-value operating point above.
+
+**Sharing learned values through a codebook.** The sparse head above stores one independent float per active class-atom/feature entry, but its learned support pattern already costs more bits than its values. `resisc45_codebook.py` instead lets a large support reuse `Q` learned scalar feature levels. The 44-class raw intercept is either stored directly or reconstructed from a small learned code over the same fixed 16,384-atom Gaussian class dictionary. Feature scales are rounded to powers of two, so the data-derived exponents are discrete ids; candidate mappings, support locations, level assignments, exponent origin/deltas, and bias-atom ids are all charged in structure bits. Deterministic one-hot reconstruction removes CUDA atomic nondeterminism, and every selected model is persisted with all learned values and discrete decode arrays.
+
+Four disjoint 8,192-entry support searches and the bracketed `C={0.001,0.003,0.01,0.03,0.1}` grid give:
+
+| Learned values | Feature levels | Bias atoms | Mean validation | Mean test | Test standard deviation | Test range | Total model bits |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 18 | 2 | 16 | 0.8024 | 0.7852 | 0.0024 | 0.7825-0.7878 | 216,955 |
+| **19** | **3** | **16** | 0.8187 | **0.8021** | 0.0035 | 0.7971-0.8052 | 225,179 |
+| **20** | **3** | **17** | 0.8235 | **0.8066** | 0.0070 | **0.8003-0.8160** | 225,225 |
+| 21 | 3 | 18 | 0.8279 | 0.8119 | 0.0049 | 0.8071-0.8173 | 225,271 |
+| 22 | 4 | 18 | 0.8368 | 0.8200 | 0.0022 | 0.8183-0.8227 | 225,303 |
+| 24 | 4 | 20 | 0.8420 | 0.8225 | 0.0030 | 0.8190-0.8254 | 225,395 |
+| 28 | 4 | 24 | 0.8435 | 0.8256 | 0.0013 | 0.8237-0.8267 | 225,579 |
+| 30 | 6 | 24 | 0.8459 | 0.8282 | 0.0023 | 0.8251-0.8306 | 233,835 |
+| **32** | **8** | **24** | **0.8471** | **0.8292** | 0.0009 | 0.8281-0.8303 | 233,899 |
+
+Nineteen learned float values are the first validation-selected mean above 80%, while 20 are the first count at which all four support-search offsets clear 80%; 18 values are readably below at 78.52%. At 32 values the head is both stronger and less variable than the 3,884-independent-value model.
+
+Increasing only the discrete support size improves maximum accuracy. A 32,768-entry support wins on validation; doubling to 65,536 does not:
+
+| Learned values | Feature levels | Bias representation | Support | Mean validation | Mean test | Test standard deviation | Total model bits |
+|---:|---:|---|---:|---:|---:|---:|---:|
+| 76 | 32 | 44 direct values | 32,768 | 0.8530 | 0.8365 | 0.0013 | 964,216 |
+| **108** | **64** | **44 direct values** | **32,768** | **0.8536** | **0.8369** | 0.0015 | **998,008** |
+| 172 | 128 | 44 direct values | 32,768 | 0.8530 | 0.8365 | 0.0012 | 1,032,824 |
+
+The 108-value model reaches **83.69% +/- 0.15 test**, about 0.4 points below the 84.1% dense ceiling on the same list. It uses far fewer learned floating-point values than the previous head but not less total storage: its 32,768 assignments make it approximately 998k bits. The 19-value model is approximately 225k bits, essentially the same as the previous 3,884-value head's approximately 224k bits under the same fixed-width accounting; the change replaces floats with discrete structure rather than making storage disappear. The checked-in artifacts and `resisc45_codebook_eval.py` reconstruct every selected head and reproduce its validation/test accuracy.
 
 
 Reproduce with:
@@ -1636,11 +1664,26 @@ python experiments/resisc45_jitter_pools.py --family c224 --crop-shift 2 --name 
 python experiments/resisc45_jitter_pools.py --average d8 c224 c224s1 c224s2 --name j32crop --pools gpu7_pool
 python experiments/resisc45_pool7_ceiling.py
 python experiments/resisc45_exact_cap.py
+for offset in 0 16 32 48; do
+  CUDA_VISIBLE_DEVICES=0 python experiments/resisc45_codebook.py --support 8192 --offset "$offset" \
+    --levels 2 3 4 6 8 --bias-atoms 16 17 18 20 24 \
+    --bias-configs 2/16 3/16 3/17 3/18 4/18 4/20 4/24 6/24 8/24 \
+    --output "experiments/resisc45_codebook_final_offset${offset}.csv"
+done
+python experiments/resisc45_codebook.py --summarize-bias-atoms \
+  --summarize-prefix resisc45_codebook_final --output experiments/resisc45_codebook_final_result.csv
+for offset in 0 16 32 48; do
+  CUDA_VISIBLE_DEVICES=0 python experiments/resisc45_codebook.py --support 32768 --offset "$offset" \
+    --levels 32 64 128 --output "experiments/resisc45_codebook_s32768_offset${offset}.csv"
+done
+python experiments/resisc45_codebook.py --summarize --summarize-support 32768 \
+  --output experiments/resisc45_codebook_s32768_result.csv
+python experiments/resisc45_codebook_eval.py
 ```
 
 The union table's replicate, low-budget, prune-variant, control and high-budget rows are the same command with `--seed-offset 16 --union-seeds 4 8 16`, `--budgets 2048 2560 --union-seeds 8`, `--prune-rounds 6` or `--prune-c 0.03`, `--union-seeds 1 4 --search-scale 2` or `4`, and `--budgets 3840 4032`; they are merged into the one CSV.
 
-Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv`, `experiments/resisc45_search_decay_union.csv` `experiments/resisc45_union_variants_{quota,subsample,mixed,union2,cgrid,cgrid_prune01}.csv`, `experiments/resisc45_pool5_ceiling_result.csv`, `experiments/resisc45_pool5_ceiling_pairs.csv` `experiments/resisc45_union_pool5_{a,b,budget_a,budget_b}.csv`, `experiments/resisc45_pool6_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_pool6.csv`, `experiments/resisc45_dihedral_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_d8_{a,budget,budget_low}.csv`, `experiments/resisc45_transform_ceiling_{result,pairs,probe}.csv`, `experiments/resisc45_union_transform_{sqrt,pickskew}.csv`, `experiments/resisc45_hidden_units_result.csv`, `experiments/resisc45_union_hinge.csv`, `experiments/resisc45_jitter_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_jitter_{c224,j16,c224_budget,j16_budget}.csv`, `experiments/resisc45_exact_cap_result.csv`, `experiments/resisc45_multicrop_{ceiling,progressive,stop}_{result,pairs}.csv`, `experiments/resisc45_union_j{16_cap,j32crop}*.csv`, and `experiments/resisc45_pool7_ceiling_{result,pairs}.csv`. The fifth, sixth, and seventh pools are cached as `data/cache/resisc45_{split}_gpu{5,6,7}_pool.npy`; progressive crop and mixed-view means are cached under their family suffixes through `j48crop`. The whole section now represents roughly 300 GPU-minutes.
+Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv`, `experiments/resisc45_search_decay_union.csv` `experiments/resisc45_union_variants_{quota,subsample,mixed,union2,cgrid,cgrid_prune01}.csv`, `experiments/resisc45_pool5_ceiling_result.csv`, `experiments/resisc45_pool5_ceiling_pairs.csv` `experiments/resisc45_union_pool5_{a,b,budget_a,budget_b}.csv`, `experiments/resisc45_pool6_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_pool6.csv`, `experiments/resisc45_dihedral_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_d8_{a,budget,budget_low}.csv`, `experiments/resisc45_transform_ceiling_{result,pairs,probe}.csv`, `experiments/resisc45_union_transform_{sqrt,pickskew}.csv`, `experiments/resisc45_hidden_units_result.csv`, `experiments/resisc45_union_hinge.csv`, `experiments/resisc45_jitter_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_jitter_{c224,j16,c224_budget,j16_budget}.csv`, `experiments/resisc45_exact_cap_result.csv`, `experiments/resisc45_multicrop_{ceiling,progressive,stop}_{result,pairs}.csv`, `experiments/resisc45_union_j{16_cap,j32crop}*.csv`, `experiments/resisc45_pool7_ceiling_{result,pairs}.csv`, and `experiments/resisc45_codebook_{final,s32768,models}_result.csv`. Complete selected codebook artifacts are under `experiments/resisc45_codebook_models/`. The fifth, sixth, and seventh pools are cached as `data/cache/resisc45_{split}_gpu{5,6,7}_pool.npy`; progressive crop and mixed-view means are cached under their family suffixes through `j48crop`. The whole section now represents roughly 350 GPU-minutes.
 
 ## Image-statistics baseline
 
