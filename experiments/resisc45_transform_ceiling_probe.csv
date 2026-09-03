@@ -1,0 +1,9 @@
+arm,structure,columns,val_accuracy,test_accuracy,seconds
+linear/list768-d8,dense/C=0.03,768,0.8487,0.8325,4.3
+hinge0/list768-d8,knots=0/C=0.03,1536,0.86,0.8398,5.7
+hinge/list768-d8,"knots=-1,0,1/C=0.01",3072,0.8594,0.843,7.7
+pairrelu4096/list768-d8,pairs=4096/C=0.03,4864,0.8717,0.8473,9.9
+mlp64/list768-d8,h=64/wd=0.001,768,0.8546,0.8398,4.1
+mlp128/list768-d8,h=128/wd=0.001,768,0.8702,0.8459,6.3
+mlp512/list768-d8,h=512/wd=0.0001,768,0.8773,0.8595,15.6
+mlp1024/list768-d8,h=1024/wd=0.0001,768,0.8822,0.8627,28.4

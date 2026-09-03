@@ -1409,6 +1409,45 @@ Test accuracy. At 3,628 deployed values the eight heads on averaged pools read *
 
 **The 4,096-value frontier after this section.** The union-of-eight head on the dihedral-averaged 768-column 384/128/128 + 128 list at 3,584 code values reads **81.56% test at 3,628 deployed values** (validation 0.8387, the validation pick among eight heads; best draw 81.75%), the method's expected test accuracy at that budget is 81.4% +/- 0.2 over eight heads on two lists and four disjoint search sets, the 736-column list reads 81.0-81.4% at 2,604 values and 80.9-81.3% at 2,092, and 80% is reached at 1,580 values on one of two search sets. Nothing in the deployed head changed: the extractor averages its zero-parameter columns over the eight dihedral views of the image at eight times the extraction cost. What is left: the averaged list's dense ceiling is 83.1% (merged 83.3%), the head recovers it minus 1.2-1.7 points, and the two largest confusions read 33-40 and 23-27 errors under dense heads, still 1 point between them; a sixth pool of random deep features did not touch them, so the remaining candidates are hand-designed part features for those two pairs or a head with a few learned hidden units.
 
+**Two named levers closed on the averaged list: per-column transforms and a few learned hidden units.** The frontier paragraph above leaves the head 1.2-1.7 points under its list's dense ceiling and names two levers that do not touch the pools: a fixed nonlinearity per column, and a head with a few learned hidden units. Both were read at the ceiling of the dihedral-averaged 768-column 384/128/128 + 128 list, and the first also under the union head. `resisc45_transform_ceiling.py` applies a fixed, scale-free monotone map `sign(x)|x|^p` to every column before standardisation: because the standardiser folds into the sparse code (`W_eff = Dc P / sigma`, `b_eff = b - W_eff mu`), such a map costs no deployed value, whereas any map with a per-column constant inside the nonlinearity (a shift, a scale, a hinge knot) costs one value per column that the support touches. The columns are skewed (median absolute skewness about 1, a fifth above 2), and iteration 1 found a hinge at each column's mean worth 1.7 points on the old pool, so a concave bend per column might have bought part of that for free. Dense heads with `C` on validation:
+
+| Per-column transform, 768 averaged columns | Columns | Train | Validation | Test |
+|---|---:|---:|---:|---:|
+| Raw (the frontier list) | 768 | 0.9571 | 0.8487 | **0.8325** |
+| `sign(x)|x|^1/2` | 768 | 0.9595 | 0.8479 | 0.8303 |
+| `sign(x)|x|^1/3` | 768 | 0.9590 | 0.8429 | 0.8278 |
+| `sign(x)|x|^1/4` | 768 | 0.9164 | 0.8397 | 0.8211 |
+| Per column the power in {1, 1/2, 1/3, 1/4} with the least training skewness | 768 | 0.9615 | 0.8506 | 0.8313 |
+| `sign(x) log1p(|x| / median|x|)` (one constant per column) | 768 | 0.9615 | 0.8505 | 0.8330 |
+| Train quantile map to a normal (the bound on any monotone map, not deployable) | 768 | 0.9651 | 0.8484 | 0.8302 |
+| Raw plus its square-root copy | 1,536 | 0.9808 | 0.8525 | 0.8335 |
+| Square root, list re-ranked on the transformed pools (85-96% of columns shared) | 768 | 0.9596 | 0.8486 | 0.8303 |
+
+Every monotone map reads at or below raw, and the quantile map, which is the best any monotone per-column function can do, reads raw exactly; the two-copy arm gains a tenth where a hinge copy gains 0.7 (next table), so what the columns are missing is a *bend*, not a change of scale. Under the union head (`resisc45_union_variants.py --d8 --transform`, two disjoint search sets, 3,628 deployed values) the square root reads 0.8132 / 0.8105 and the per-column pick 0.8117 / 0.8122 against 0.8122 / 0.8175 for raw, so a more Gaussian column set does not make the chaotic support search better behaved either. The same script's `--probe` re-reads iteration 1's nonlinear headroom on the averaged list, which says whether averaging removed it:
+
+| Nonlinear headroom on the averaged 768-column list | Columns | Validation | Test |
+|---|---:|---:|---:|
+| Dense linear | 768 | 0.8487 | 0.8325 |
+| Plus a hinge at each column's mean | 1,536 | 0.8600 | 0.8398 |
+| Plus hinges at -1, 0, 1 | 3,072 | 0.8594 | 0.8430 |
+| Plus 4,096 random signed pair-ReLUs | 4,864 | 0.8717 | 0.8473 |
+| MLP, width 64 / 128 | 768 | 0.8546 / 0.8702 | 0.8398 / 0.8459 |
+| MLP, width 512 / 1,024 | 768 | 0.8773 / 0.8822 | 0.8595 / **0.8627** |
+
+The MLP gap is intact at three points (it was 3.2 on the old 2,084-column pool), the hinge-at-mean share of it has fallen from 1.7 to 0.7, and the shape is the same as before: additive-plus-width-2 columns buy a third to a half of it, and a wide first layer the rest. `resisc45_hidden_units.py` then reads the cheapest deployable version, a dense linear head plus `H` ReLU units trained jointly (`logits = zW + b + relu(zV + c)U`), first with dense inputs and then with each unit's input vector magnitude-pruned to its top `s` columns and the model retrained under the mask; a unit costs `s + 1` values for its inputs and bias plus 44 output weights, and the table prices the units alone (the dense linear part is the 83.2% ceiling head):
+
+| Linear head plus `H` learned units, test accuracy (values spent on the units) | Dense inputs | `s` = 8 | `s` = 16 | `s` = 32 | `s` = 64 |
+|---|---:|---:|---:|---:|---:|
+| `H` = 0 | 0.8321 | | | | |
+| `H` = 4 | 0.8313 (3,252) | 0.8324 (212) | 0.8325 (244) | 0.8330 (308) | 0.8338 (436) |
+| `H` = 8 | 0.8303 (6,504) | 0.8329 (424) | 0.8332 (488) | 0.8327 (616) | 0.8341 (872) |
+| `H` = 16 | 0.8337 (13,008) | 0.8330 (848) | 0.8346 (976) | 0.8344 (1,232) | 0.8351 (1,744) |
+| `H` = 32 | 0.8371 (26,016) | 0.8346 (1,696) | 0.8362 (1,952) | 0.8357 (2,464) | 0.8386 (3,488) |
+| `H` = 64 | 0.8468 (52,032) | 0.8335 (3,392) | 0.8352 (3,904) | 0.8386 (4,928) | 0.8414 (6,976) |
+
+Validation moves with test throughout (0.848-0.853 for every row under `H` = 64). A few units are worth almost nothing next to a dense linear head: up to 32 of them with sparse inputs buy 0.1-0.6 points for 200-3,500 values, and the first arm that gains more than a point (64 dense-input units, +1.5) costs 52,000. Under the budget the units would displace most of the code, and the budget table above says 3,000 code values are worth 2.5 points, so no allocation of 3,628 values to a hidden layer can pay. The last read closes the hinge from the other side: `resisc45_union_variants.py --d8 --hinge` appends the hinge copy of every column to the list and lets the union head buy hinge columns one entry at a time, charging one constant for every hinge column the support touches (`hinge_used` in the row). The head spreads over 524-548 of the 768 hinge columns whatever the budget and reads 0.8140 / 0.8143 at 4,160 / 4,176 deployed values (validation 0.841 / 0.838) and 0.8092 / 0.8163 at 3,655 / 3,640 (validation 0.838 / 0.834) against 0.8122 / 0.8175 at 3,628 for the raw list, the finding of iteration 1 repeated under a head whose reads are stable to 0.2 points: the hinge headroom is collective, spread across hundreds of small weights, and a sparse head cannot buy it. The frontier statement above is unchanged, and the two non-pool levers that were open after the fifth pool are now closed on the averaged list; what remains is the pool side, and there the two big confusions still want part-configuration information that no global statistic has supplied.
+
+
 Reproduce with:
 
 ```bash
@@ -1462,11 +1501,20 @@ python experiments/resisc45_union_variants.py --d8 --arm quota --quotas q384/128
   --offsets 0 16 --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 --out experiments/resisc45_union_d8_budget.csv
 python experiments/resisc45_union_variants.py --d8 --arm quota --quotas q384/128/128/96 --budgets 1024 1536 \
   --offsets 0 16 --c-grid 0.003 0.01 0.03 0.1 0.3 1 3 10 --out experiments/resisc45_union_d8_budget_low.csv
+python experiments/resisc45_transform_ceiling.py
+python experiments/resisc45_transform_ceiling.py --probe
+python experiments/resisc45_union_variants.py --d8 --transform sqrt --quotas q384/128/128/128 --offsets 0 16 \
+  --c-grid 0.003 0.01 0.03 0.1 0.3 1.0 --out experiments/resisc45_union_transform_sqrt.csv
+python experiments/resisc45_union_variants.py --d8 --transform pick-skew --quotas q384/128/128/128 --offsets 0 16 \
+  --c-grid 0.003 0.01 0.03 0.1 0.3 1.0 --out experiments/resisc45_union_transform_pickskew.csv
+python experiments/resisc45_hidden_units.py
+python experiments/resisc45_union_variants.py --d8 --hinge --quotas q384/128/128/128 --budgets 3584 3072 \
+  --offsets 0 16 --c-grid 0.003 0.01 0.03 0.1 0.3 1.0 --out experiments/resisc45_union_hinge.csv
 ```
 
 The union table's replicate, low-budget, prune-variant, control and high-budget rows are the same command with `--seed-offset 16 --union-seeds 4 8 16`, `--budgets 2048 2560 --union-seeds 8`, `--prune-rounds 6` or `--prune-c 0.03`, `--union-seeds 1 4 --search-scale 2` or `4`, and `--budgets 3840 4032`; they are merged into the one CSV.
 
-Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv`, `experiments/resisc45_search_decay_union.csv` `experiments/resisc45_union_variants_{quota,subsample,mixed,union2,cgrid,cgrid_prune01}.csv`, `experiments/resisc45_pool5_ceiling_result.csv`, `experiments/resisc45_pool5_ceiling_pairs.csv` `experiments/resisc45_union_pool5_{a,b,budget_a,budget_b}.csv`, `experiments/resisc45_pool6_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_pool6.csv`, `experiments/resisc45_dihedral_ceiling_{result,pairs}.csv` and `experiments/resisc45_union_d8_{a,budget,budget_low}.csv` (the fifth and sixth pools are cached as `data/cache/resisc45_{split}_gpu5_pool.npy` and `_gpu6_pool.npy` with their `_names.txt`, the dihedral-averaged pools as `data/cache/resisc45_{split}_gpu{,2,3,4,5}d8_pool.npy`, and `experiments/resisc45_union_failures_{classes,pairs}.csv` hold the per-class and per-pair confusions of the incumbent head that the fifth pool was designed from); the whole section is about 140 GPU-minutes.
+Results are written to `experiments/resisc45_budget4096_result.csv`, `experiments/resisc45_standardiser_4096.csv`, `experiments/resisc45_nonlinear_probe_result.csv`, `experiments/resisc45_pool4_ceiling_result.csv`, `experiments/resisc45_candidate_lists_result.txt`, `experiments/resisc45_expanded_head_plainrank.csv`, `experiments/resisc45_expanded_head_result.csv`, `experiments/resisc45_head_regime_result.csv`, `experiments/resisc45_search_decay_result.csv`, `experiments/resisc45_search_decay_quota.csv`, `experiments/resisc45_search_decay_coarse.csv`, `experiments/resisc45_search_decay_noise.csv`, `experiments/resisc45_search_decay_union.csv` `experiments/resisc45_union_variants_{quota,subsample,mixed,union2,cgrid,cgrid_prune01}.csv`, `experiments/resisc45_pool5_ceiling_result.csv`, `experiments/resisc45_pool5_ceiling_pairs.csv` `experiments/resisc45_union_pool5_{a,b,budget_a,budget_b}.csv`, `experiments/resisc45_pool6_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_pool6.csv`, `experiments/resisc45_dihedral_ceiling_{result,pairs}.csv`, `experiments/resisc45_union_d8_{a,budget,budget_low}.csv`, `experiments/resisc45_transform_ceiling_{result,pairs,probe}.csv`, `experiments/resisc45_union_transform_{sqrt,pickskew}.csv`, `experiments/resisc45_hidden_units_result.csv` and `experiments/resisc45_union_hinge.csv` (the fifth and sixth pools are cached as `data/cache/resisc45_{split}_gpu5_pool.npy` and `_gpu6_pool.npy` with their `_names.txt`, the dihedral-averaged pools as `data/cache/resisc45_{split}_gpu{,2,3,4,5}d8_pool.npy`, and `experiments/resisc45_union_failures_{classes,pairs}.csv` hold the per-class and per-pair confusions of the incumbent head that the fifth pool was designed from); the whole section is about 140 GPU-minutes.
 
 ## Image-statistics baseline
 
@@ -1571,6 +1619,9 @@ Submission 01 already happened to score 95.02% on test, but its validation accur
 | Zero-parameter columns for the church/palace and basketball/tennis confusions | The fifth pool was aimed at these pairs (line curvature, colour beside markings, largest-region shape) and separates them at the class-mean level by 0.5-0.9 standard deviations, but the dense head's test confusions stay at 36-39 and 24-26 with or without the pool, as they do for a wide MLP on all 4,268 columns; the ceiling gain came from mid-table pairs instead |
 | Multi-layer random convolutional features (sixth RESISC45 pool) | 768 columns from seeded three-layer random ReLU networks at two scales read 58.5% test alone (above the single-layer random convolutions' 55.1%) but leave the 736-column list's dense ceiling at 0.8224-0.8265 against 0.8230, and four union heads with a fifth quota block read 0.8104 +/- 0.19 points against 0.8091 +/- 0.29 without; random compositions of random patterns add no information the five pools lack |
 | Keeping the un-averaged columns next to their dihedral-averaged copies | The 736 original columns plus their 736 averaged copies read 0.8314 test against 0.8313 for the averaged copies alone; the orientation-dependent part of a column is nuisance, not signal, on RESISC45 |
+| Fixed per-column monotone transforms of the RESISC45 columns | Scale-free powers 1/2, 1/3, 1/4, a per-column pick by skewness, a relative log and the train quantile map to a normal all read 0.8211-0.8330 test on the averaged 768-column list against 0.8325 raw, and the square root and the pick read 0.8105-0.8132 under the union head at 3,628 values against 0.8122 / 0.8175; the quantile map bounds every monotone per-column function, so the missing nonlinearity is a bend, not a change of scale |
+| A few learned hidden units next to the dense RESISC45 linear head | Up to 32 ReLU units trained jointly with the linear head, inputs magnitude-pruned to 8-64 columns and retrained, read +0.1 to +0.6 test points for 200-3,500 values on the averaged 768-column list; the first arm above a point (64 dense-input units, +1.5) costs 52,000 values, and 3,000 code values buy 2.5 points, so no split of 3,628 values towards a hidden layer can pay |
+| Hinge columns under the union head | Appending the hinge copy of every column and charging one constant per hinge column the support touches, the union head spreads over 524-548 of the 768 hinges and reads 0.8140 / 0.8143 at 4,160-4,176 deployed values and 0.8092 / 0.8163 at 3,640-3,655, the raw list's 0.8122 / 0.8175 at 3,628; the hinge headroom (+0.7 dense) is collective and stays unbuyable under a head whose reads are stable to 0.2 points |
 
 The consistent conclusion is that the classifier is not the bottleneck. Purpose-built, parameter-free spatial summaries deliver far more accuracy per linear-head feature than additional learned capacity or generic random features.
 

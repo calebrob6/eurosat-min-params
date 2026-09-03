@@ -120,6 +120,17 @@ def main() -> None:
     parser.add_argument('--d8', action='store_true',
                         help='read the dihedral-averaged pools (resisc45_dihedral_pools.py) '
                              'in place of every GPU pool')
+    parser.add_argument('--transform', choices=('none', 'sqrt', 'cbrt', 'quart', 'pick-skew'),
+                        default='none',
+                        help='fixed per-column monotone transform sign(x)|x|^p of every column '
+                             'before standardisation (resisc45_transform_ceiling.py); zero '
+                             'deployed cost because the standardiser folds into the code')
+    parser.add_argument('--rank-transformed', action='store_true',
+                        help='rank the blocks on the transformed columns instead of the raw ones')
+    parser.add_argument('--hinge', action='store_true',
+                        help='append relu of every standardised column to the list (a hinge at '
+                             'the mean, one deployed constant per hinge column the support '
+                             'touches, charged in deployed_values)')
     parser.add_argument('--out', default=RESULT_PATH)
     args = parser.parse_args()
     if args.c_grid:
@@ -135,11 +146,29 @@ def main() -> None:
     extra, _, _ = load_pools((pool_name(args.extra_pool),))
     extra2, _, _ = load_pools((args.extra_pool2,))
     blocks = (base, layout, new, extra, extra2)
-    orders = [group_lasso_rank(b['train'], y['train'], lam=LAM, epochs=1500)[0] for b in blocks]
+    if args.transform != 'none':
+        from resisc45_transform_ceiling import POWERS, apply_power, pick_skew
+        if args.transform == 'pick-skew':
+            transformed = tuple(pick_skew(b)[0] for b in blocks)
+        else:
+            transformed = tuple(apply_power(b, POWERS[args.transform]) for b in blocks)
+        rank_on = transformed if args.rank_transformed else blocks
+        orders = [group_lasso_rank(b['train'], y['train'], lam=LAM, epochs=1500)[0]
+                  for b in rank_on]
+        blocks = transformed
+    else:
+        orders = [group_lasso_rank(b['train'], y['train'], lam=LAM, epochs=1500)[0]
+                  for b in blocks]
 
     def build(quota):
-        return {s: np.concatenate([b[s][:, o[:q]] for b, o, q in zip(blocks, orders, quota)],
-                                  axis=1) for s in base}
+        out = {s: np.concatenate([b[s][:, o[:q]] for b, o, q in zip(blocks, orders, quota)],
+                                 axis=1) for s in base}
+        if args.hinge:
+            from resisc45_lib import standardise
+            mu, sigma = standardise(out['train'])
+            out = {s: np.concatenate([v, np.maximum((v - mu) / sigma, 0.0).astype(np.float32)],
+                                     axis=1) for s, v in out.items()}
+        return out
 
     cdict = gaussian_atoms(ATOMS)
     if args.arm == 'quota':
@@ -173,8 +202,13 @@ def main() -> None:
         support = prune(x, y, cdict, fdict, support, budget, args.prune_rounds, args.prune_c,
                         args.steps)
         best = select_c(x, y, cdict, fdict, support, args.steps)
-        rows.append({'arm': args.arm, 'list': qname, 'prune_c': args.prune_c, 'columns': x['train'].shape[1],
-                     'budget': budget, 'deployed_values': budget + ROWS, 'fraction': fraction,
+        cols = np.unique(support % fdict.shape[1])
+        hinge_used = int((cols >= x['train'].shape[1] // 2).sum()) if args.hinge else 0
+        rows.append({'arm': args.arm, 'list': qname, 'transform': args.transform,
+                     'hinge': int(args.hinge), 'hinge_used': hinge_used,
+                     'prune_c': args.prune_c, 'columns': x['train'].shape[1],
+                     'budget': budget, 'deployed_values': budget + ROWS + hinge_used,
+                     'fraction': fraction,
                      'searches': args.searches, 'groups': args.groups if args.arm == 'union2' else 1,
                      'seed_offset': offset, 'union': union, 'C': best['C'],
                      **{key: best[key] for key in ('train_accuracy', 'val_accuracy',
