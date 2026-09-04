@@ -1,5 +1,7 @@
 # Exact EuroSAT runs with torchgeo-bench
 
+> These are **archived runs**, not a complete reproduction of the current article's external scoreboard. Only the DOFA Large linear row is on that scoreboard. `olmoearth_large.csv` is v1 Large (99.02%), not v1.2 Nano/Small/Base, and the separate benchmark ImageStats row (90.65%) is not our 90.96% baseline. The newer full-data and backbone fraction CSVs are missing; see [the article audit](../../REPRODUCIBILITY.md#external-benchmark-evidence-still-required).
+
 These results were computed with [`torchgeo/torchgeo-bench`](https://github.com/torchgeo/torchgeo-bench) at commit `c95391940d58358dd4c522c31703ee12ac030357`.
 
 Every run uses the plain `eurosat` dataset wrapper and the same fixed split files as this repository:
@@ -25,7 +27,7 @@ The benchmark was configured with `eval.merge_val=false`, so `C` is selected on 
 
 `ImageStats` computes mean, population standard deviation, maximum, and minimum for each channel. DOFA consumes all 13 EuroSAT bands. OlmoEarth has no B10 cirrus slot, so the torchgeo-bench wrapper skips B10 and uses the other 12 bands even though the result row records the requested band configuration as `all`.
 
-The linear probes use 1,024-dimensional embeddings, so each benchmark checkpoint stores `10 * (1024 + 1) = 10,250` task-specific probe parameters. The frozen backbones contain 337,151,533 parameters for DOFA Large and 668,045,312 parameters for OlmoEarth v1 Large according to `results/compute_cost.csv` in the benchmark repository.
+The DOFA and OlmoEarth probes use 1,024-dimensional embeddings, so their heads store `10 * (1024 + 1) = 10,250` task-specific probe parameters. ImageStats uses 52 features and a 530-value full head. The frozen backbones contain 337,151,533 parameters for DOFA Large and 668,045,312 parameters for OlmoEarth v1 Large according to `results/compute_cost.csv` in the benchmark repository.
 
 ## Local-model confidence intervals
 

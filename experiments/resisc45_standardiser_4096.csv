@@ -1,7 +1,0 @@
-budget,arm,scaling,features_dict,bias,mp_atoms,steps,code,intercept_values,scaling_values,deployed_values,deployed_bits,stored_values,features,class_atoms,feature_atoms,structure,val_accuracy,test_accuracy,test_delta,delta_lo,delta_hi
-1024,zscore/pairs256/free,zscore,pairs256,free,0,300,1024,44,235,1303,72422,1068,316,16384,65792,C=0.3,0.7752,0.76,0.0,0.0,0.0
-1024,zbuck/pairs256/free,zbuck,pairs256,free,0,300,1024,44,14,1082,66225,1068,295,16384,65792,C=0.1,0.7733,0.7497,-0.0103,-0.0194,-0.0016
-2048,zscore/pairs256/free,zscore,pairs256,free,0,300,2048,44,241,2333,136108,2092,374,16384,65792,C=3.0,0.7889,0.77,0.0,0.0,0.0
-2048,zbuck/pairs256/free,zbuck,pairs256,free,0,300,2048,44,14,2106,129758,2092,333,16384,65792,C=0.1,0.7821,0.7641,-0.0059,-0.0141,0.0025
-4096,zscore/pairs256/free,zscore,pairs256,free,0,300,4096,44,245,4385,263223,4140,390,16384,65792,C=0.3,0.7948,0.7768,0.0,0.0,0.0
-4096,zbuck/pairs256/free,zbuck,pairs256,free,0,300,4096,44,12,4152,256603,4140,296,16384,65792,C=0.3,0.7798,0.764,-0.0128,-0.0211,-0.0043

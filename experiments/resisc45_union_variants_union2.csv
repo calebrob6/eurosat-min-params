@@ -1,3 +1,0 @@
-arm,list,columns,budget,deployed_values,fraction,searches,groups,seed_offset,union,C,train_accuracy,val_accuracy,test_accuracy,seconds
-union2,q384/128/128,640,3584,3628,1.0,8,4,0,8929,0.03,0.9388,0.8219,0.801,96.7
-union2,q384/128/128,640,3584,3628,1.0,8,4,16,8722,0.03,0.9357,0.8175,0.7994,94.9

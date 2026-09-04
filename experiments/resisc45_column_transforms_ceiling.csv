@@ -1,9 +1,0 @@
-arm,list,transform,columns,spec,train_accuracy,val_accuracy,test_accuracy,C,seconds
-dense,q384/128/128,raw,640,"{'id': 640, 'sqrt': 0, 'cbrt': 0, 'log': 0}",0.9396,0.8337,0.8103,0.03,5.6
-dense+hinge,q384/128/128,raw,1280,"{'id': 640, 'sqrt': 0, 'cbrt': 0, 'log': 0}",0.9825,0.839,0.821,0.03,13.2
-dense,q384/128/128,sqrt,640,"{'id': 0, 'sqrt': 533, 'cbrt': 107, 'log': 0}",0.9425,0.8275,0.8051,0.03,5.5
-dense+hinge,q384/128/128,sqrt,1280,"{'id': 0, 'sqrt': 533, 'cbrt': 107, 'log': 0}",0.9879,0.8376,0.8179,0.03,13.3
-dense,q384/128/128,log,640,"{'id': 0, 'sqrt': 123, 'cbrt': 107, 'log': 410}",0.9434,0.8289,0.8046,0.03,6.6
-dense,q384/128/128,fstat,640,"{'id': 238, 'sqrt': 130, 'cbrt': 26, 'log': 246}",0.9437,0.8324,0.809,0.03,7.8
-dense+hinge,q384/128/128,fstat,1280,"{'id': 238, 'sqrt': 130, 'cbrt': 26, 'log': 246}",0.9532,0.8427,0.817,0.01,16.5
-dense,q384/128/128,rankgauss,640,{'rankgauss': 640},0.9078,0.8316,0.8021,0.01,7.9

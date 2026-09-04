@@ -1,3 +1,0 @@
-arm,list,prune_c,columns,budget,deployed_values,fraction,searches,groups,seed_offset,union,C,train_accuracy,val_accuracy,test_accuracy,seconds
-quota,q384/128/128,0.01,640,3584,3628,1.0,8,1,0,12923,0.01,0.8931,0.8222,0.8006,24.8
-quota,q384/128/128,0.01,640,3584,3628,1.0,8,1,16,13109,0.03,0.9076,0.8175,0.797,24.5

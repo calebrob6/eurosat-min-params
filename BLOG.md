@@ -1,5 +1,7 @@
 # "Solving" EuroSAT with 171 parameters
 
+> Historical draft. The release targets the later 306-parameter article. Use [README.md](README.md), [RESULTS.md](RESULTS.md), and [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for current commands, physical-band corrections, and measured results.
+
 EuroSAT is not a hard dataset to solve with a modern pretrained vision model. The more interesting question is how little model we actually need.
 
 We treated EuroSAT as a parameter-counting game: reach a target test accuracy while storing as few learned numbers as possible. The feature extractor could use fixed arithmetic, but every learned weight and bias in the classifier counted. We started with 94% as the target, reduced the model to 171 learned parameters, then raised the target to 95% and reached it with 279 parameters.

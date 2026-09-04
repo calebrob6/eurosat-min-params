@@ -16,8 +16,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from src.cache import load_cached  # noqa: E402
-from src.data import CLASSES  # noqa: E402
+from src.data import CLASSES, iter_images  # noqa: E402
 from src.features import patch_features  # noqa: E402
 from src.linmodel import predict_reference_class  # noqa: E402
 
@@ -43,9 +42,12 @@ def main() -> None:
           f'ref_class={ref} params={params} cfg={cfg}')
 
     for split in ('val', 'test'):
-        x, y = load_cached(split)
-        f, _ = patch_features(x, **cfg)
-        pred = predict_reference_class(f, w, b, fi, ref=ref)
+        predictions, labels = [], []
+        for x, y in iter_images(split):
+            f, _ = patch_features(x, **cfg)
+            predictions.append(predict_reference_class(f, w, b, fi, ref=ref))
+            labels.append(y)
+        pred, y = np.concatenate(predictions), np.concatenate(labels)
         acc = accuracy_score(y, pred)
         flag = '  >=95%!' if acc >= 0.95 else ''
         print(f'{split}: acc={acc:.4f}  (n={len(y)}){flag}')

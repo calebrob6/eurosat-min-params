@@ -5,7 +5,7 @@ The EuroSAT dataset ships as 27,000 64x64 patches with 13 Sentinel-2 bands each
 text files listing ``<Class>_<id>.jpg`` filenames; we map those to the
 corresponding 13-band ``.tif`` files.
 
-Band order (torchgeo ``EuroSAT.all_band_names``):
+Historical feature-code aliases (NOT TorchGeo's actual TIFF band order):
     0:B01 1:B02(blue) 2:B03(green) 3:B04(red) 4:B05 5:B06 6:B07
     7:B08(nir) 8:B08A 9:B09 10:B10 11:B11(swir1) 12:B12(swir2)
 """
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ProcessPoolExecutor
+from collections.abc import Iterator
 
 import numpy as np
 import rasterio
@@ -39,7 +40,13 @@ BAND_NAMES = [
     'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
     'B08', 'B08A', 'B09', 'B10', 'B11', 'B12',
 ]
-# Common semantic band indices.
+# Physical TIFF order. Existing model arithmetic uses the historical aliases
+# below; silently changing their indices would invalidate every checkpoint.
+TIFF_BAND_NAMES = [
+    'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
+    'B08', 'B09', 'B10', 'B11', 'B12', 'B8A',
+]
+# Legacy SWIR aliases index B12 and B8A, respectively. See REPRODUCIBILITY.md.
 B_BLUE, B_GREEN, B_RED, B_NIR, B_SWIR1, B_SWIR2 = 1, 2, 3, 7, 11, 12
 
 DATA_ROOT = os.path.join(os.path.dirname(__file__), '..', 'data', 'EuroSAT')
@@ -81,6 +88,18 @@ def read_tif(path: str) -> np.ndarray:
     """Read a 13-band patch as a ``float32`` array of shape (13, 64, 64)."""
     with rasterio.open(path) as src:
         return src.read().astype(np.float32)
+
+
+def iter_images(split: str, batch_size: int = 128) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    """Stream original TIFFs in split-file order; never read NumPy caches."""
+    if batch_size < 1:
+        raise ValueError('batch_size must be positive')
+    paths, labels = list_split(split)
+    for start in range(0, len(paths), batch_size):
+        images = np.stack([read_tif(path) for path in paths[start:start + batch_size]])
+        if images.shape[1:] != (13, 64, 64):
+            raise ValueError(f'{split}: expected 13-band 64x64 TIFFs, got {images.shape}')
+        yield images, labels[start:start + len(images)]
 
 
 def load_images(split: str, max_workers: int = 16) -> tuple[np.ndarray, np.ndarray]:

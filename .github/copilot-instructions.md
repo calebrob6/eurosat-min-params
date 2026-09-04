@@ -2,6 +2,10 @@
 
 ## Environment and commands
 
+The public default branch is EuroSAT-only. RESISC45 experiments are preserved on the `resisc45` branch. Never stage the independent `geospatialml/` checkout, `blog_post.txt`, runtime `report.*.json` files, or credentials; `geospatialml` must not become a submodule.
+
+For the release's CPU-only reference environment use Python 3.13.13 and `python -m pip install -r requirements-reproduce.txt`. The primary reproduction command is `python reproduce.py --download --fractions --check`; it streams original TIFFs and never depends on historical image/feature caches. `--refit-306` writes a new checkpoint under `output/`, never over a checked-in model. See `REPRODUCIBILITY.md` for article coverage and historical physical-band naming caveats.
+
 Run commands from the repository root. The project is a collection of directly executable Python scripts rather than an installed package, and several scripts resolve checkpoints and result files relative to the root.
 
 ```bash
@@ -62,7 +66,7 @@ torchgeo-bench run -m imagestats -d eurosat --bands all --image-size 64 --device
 
 ## Architecture
 
-`src/data.py` is the dataset contract. It fixes the 10-class label order, TorchGeo's 13-band order, and the expected `data/EuroSAT` TIFF/split-file layout. `src/cache.py` lazily converts each split into `data/cache/{split}_x_uint16.npy` plus labels; `load_cached` exposes images as `float32`.
+`src/data.py` is the dataset contract. `TIFF_BAND_NAMES` gives the physical TorchGeo order; the older `BAND_NAMES`/SWIR aliases are frozen compatibility labels and must not be silently reinterpreted. `iter_images` streams original TIFFs. `src/cache.py` is the historical uint16 image-cache path.
 
 `src/features.py` is the deployable zero-learned-parameter feature pipeline. `patch_features` appends spectral statistics, multiscale gradient summaries, coherence, orientation, cross-band, index-texture, Hough-line, and Harris-corner families according to explicit keyword configuration and returns both the matrix and ordered names.
 
@@ -72,7 +76,7 @@ torchgeo-bench run -m imagestats -d eurosat --bands all --image-size 64 --device
 
 `experiments/` contains exploratory searches and feature-family prototypes. Successful fixed feature families are promoted into `src/features.py`. `submissions/<number>_<name>/` packages a reproducible result with its own `train.py`, `eval.py`, checked-in `model.npz`, and rationale. The root `train.py` is a separate conventional TorchGeo/Lightning neural baseline, not the minimal linear submission pipeline.
 
-Use `RESULTS.md` as the source of truth for the current 94% and 95% frontiers, parameter accounting, negative results, and reproduction commands. The timestamped files in `ideas/` preserve experiment reasoning and explain why a direction was attempted or abandoned.
+Use `RESULTS.md`, `REPRODUCIBILITY.md`, and `results/` for the 171/279/306-value release and publication caveats. `src/frontier.py` freezes the final 33-feature order. Timestamped files in `ideas/` and older experiment scripts are historical evidence, not the public reproduction entry point.
 
 ## Repository-specific conventions
 
