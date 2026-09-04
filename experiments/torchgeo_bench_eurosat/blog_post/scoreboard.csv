@@ -1,0 +1,12 @@
+model_config,display_name,feature_dim,backbone_parameters,probe_parameters,test_accuracy_reported,dataset,n_train,n_val,n_test,seed,merge_val
+tgeo_earthloc_s2_resnet50,torchgeo/earthloc_s2_resnet50,4096,27690436,40970,0.8643,eurosat,16200,5400,5400,0,false
+tgeo_resnet50_s2all_moco,torchgeo/resnet50_s2_all_moco,2048,23536256,20490,0.9278,eurosat,16200,5400,5400,0,false
+resnet18,timm/resnet18,512,11204736,5130,0.9393,eurosat,16200,5400,5400,0,false
+resnet50,timm/resnet50,2048,23536256,20490,0.9496,eurosat,16200,5400,5400,0,false
+vit_base_patch16_224,timm/vit_base_patch16_224,768,87568128,7690,0.9515,eurosat,16200,5400,5400,0,false
+convnext_tiny,timm/convnext_tiny,768,27833952,7690,0.9524,eurosat,16200,5400,5400,0,false
+olmoearth_v1_2_nano,OlmoEarth v1.2 Nano,128,4225536,1290,0.9689,eurosat,16200,5400,5400,0,false
+tgeo_dofa_base,torchgeo/dofa_base,768,111346733,7690,0.9750,eurosat,16200,5400,5400,0,false
+tgeo_dofa_large,torchgeo/dofa_large,1024,337151533,10250,0.9833,eurosat,16200,5400,5400,0,false
+olmoearth_v1_2_small,OlmoEarth v1.2 Small,384,78633632,3850,0.9865,eurosat,16200,5400,5400,0,false
+olmoearth_v1_2_base,OlmoEarth v1.2 Base,768,257527616,7690,0.9880,eurosat,16200,5400,5400,0,false

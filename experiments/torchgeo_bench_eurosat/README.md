@@ -2,6 +2,8 @@
 
 The article's original scoreboard and fraction CSVs have now been recovered under [`../imported/`](../imported/). Fresh runs in [`reproduced/`](reproduced/) independently evaluate all **11 backbone scoreboard rows** and **98 learning-curve points** using unmodified TorchGeo-bench APIs.
 
+The consolidated CSV bundle used in the geospatialml.com blog post is documented in [`blog_post/README.md`](blog_post/README.md).
+
 ## Fresh reproduction
 
 Run from this repository's root on a CUDA GPU. This is separate from the CPU-only `reproduce.py` environment; pretrained weights and the cloned source are never added to Git.
