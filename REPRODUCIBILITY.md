@@ -4,6 +4,8 @@
 
 The target is `posts/eurosat-min-params/index.qmd` in the separate GeoSpatial ML blog repository at revision `dd70b6ac0815abc825bd22d558611ca924cc4d0d`, titled **Solving EuroSAT with as Few Parameters as Possible**. The local `geospatialml/` checkout is intentionally ignored; a public clone of this repository does not need it. `blog_post.txt` contained a different article and is not used.
 
+To assemble the article's original numerical table and figure data without rerunning models, use `python export_blog_results.py`. It writes the 15-row scoreboard and 126 learning-curve points to `output/blog-results/`, using the original imported backbone CSVs and local measurements rather than the fresh benchmark scores. Its `parameters_as_reported_in_article` field preserves the article's parameter descriptions, including the rounded backbone counts and ViT caveat below; it is not a new measurement of backbone sizes.
+
 The CPU reference environment is Python 3.13.13, NumPy 2.4.4, SciPy 1.18.1, scikit-learn 1.9.0, and rasterio 1.5.1. Install `requirements-reproduce.txt` in a separate environment. `reproduce.py` fixes OpenMP/OpenBLAS/MKL thread counts to one before importing numerical libraries. Unpinned versions or different BLAS stopping behavior can move a small number of predictions in refits; saved model evaluation is distinct from reproducing a coefficient fit.
 
 `reproduce.py --download --fractions --check` bypasses all historical NumPy image and feature caches. It reads the 27,000 TIFFs in fixed split-file order and recomputes all measurements in bounded batches. It preserves checked-in artifacts and emits:

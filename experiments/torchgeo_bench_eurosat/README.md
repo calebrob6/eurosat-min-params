@@ -16,15 +16,17 @@ output/benchmark-env/bin/python -m pip install \
 
 # Scoreboard-only models.
 output/benchmark-env/bin/python experiments/torchgeo_bench_eurosat/run.py --download \
-  --models earthloc moco resnet18 vit_base
+  --models earthloc moco resnet18 vit_base --output output/blog-backbones
 
 # The seven models plotted in the article, both split protocols and all fractions.
 output/benchmark-env/bin/python experiments/torchgeo_bench_eurosat/run.py --download \
   --models resnet50 convnext_tiny dofa_base dofa_large olmoearth_nano olmoearth_small olmoearth_base \
-  --datasets eurosat eurosat-spatial --fractions
+  --datasets eurosat eurosat-spatial --fractions --output output/blog-backbones
 
-python experiments/torchgeo_bench_eurosat/compare.py
+python experiments/torchgeo_bench_eurosat/compare.py --results-dir output/blog-backbones
 ```
+
+The commands above generate new results under `output/blog-backbones/`, leaving all checked-in original and reproduction CSVs untouched. To assemble the article's original table and figure data without running models, use `python export_blog_results.py` from the repository root; it combines the imported backbones with the local model results under `output/blog-results/`.
 
 Fresh measurements were made with Python 3.13.13, PyTorch 2.11.0+cu128, TorchGeo 0.10.0, timm 1.0.29, olmoearth-pretrain-minimal 0.0.6, and H100 NVL MIG GPUs. `reproduced/environment-freeze.txt` records all installed dependency versions. Per-model JSONs record resolved configs, physical bands, input size, GPU/runtime versions, frozen model-state hashes, extraction order, and embedding hashes.
 
@@ -34,7 +36,7 @@ Fresh measurements were made with Python 3.13.13, PyTorch 2.11.0+cu128, TorchGeo
 
 The model weights are frozen. Images use all 13 bands except OlmoEarth, which omits unsupported B10. OlmoEarth uses native 64x64 inputs and its pretrained normalization; other models use 224x224 bilinear inputs and the configured BandSpec normalization. No embedding StandardScaler or L2 normalization is added beyond the upstream implementation.
 
-Fractions use **nested unstratified** seed-0 prefixes of a random permutation of the shuffled training embeddings, matching the original runner. This differs intentionally from our handcrafted models' five-seed stratified curves. Each backbone row selects C over the upstream 40-point `10^-6..10^4` grid on validation, fits on train only (`merge_val=false`), and reports test accuracy with 200 bootstrap resamples. The non-Olmo random full-data scoreboard used the training-loader order directly; OlmoEarth's full-data rows retain the permutation used by its fraction sweep, even in a full-only rerun. Full-data outputs for all models go under `reproduced/scoreboard/`, separately from the curve CSVs.
+Fractions use **nested unstratified** seed-0 prefixes of a random permutation of the shuffled training embeddings, matching the original runner. This differs intentionally from our handcrafted models' five-seed stratified curves. Each backbone row selects C over the upstream 40-point `10^-6..10^4` grid on validation, fits on train only (`merge_val=false`), and reports test accuracy with 200 bootstrap resamples. The non-Olmo random full-data scoreboard used the training-loader order directly; OlmoEarth's full-data rows retain the permutation used by its fraction sweep, even in a full-only rerun. Full-data outputs for all models go under the selected output directory's `scoreboard/` subdirectory, separately from the curve CSVs.
 
 Seed 0 does **not** imply the same subset across backbones: model initialization consumes Torch random state before the shuffled training loader runs. For example, the reproduced 162-image ResNet-50 subset shares only two images with the ConvNeXt-Tiny subset. This is inherited from the original runner; the new runner deliberately preserves it rather than silently changing the experiment. Subset hashes and cached sample filenames expose the difference. Bootstrap intervals cover test-image resampling, not uncertainty from these different training draws.
 

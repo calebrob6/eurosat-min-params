@@ -2,6 +2,8 @@
 
 These files were supplied from the original TorchGeo-bench experiment checkout. They are historical evidence, not the fresh rerun. CSVs and manifests are preserved without changing their measurements; local logs, lock files, and bytecode are excluded from Git.
 
+These are the original scores quoted in the article, including DOFA Large 98.33% and OlmoEarth v1.2 Nano/Small/Base 96.89%/98.65%/98.80%. From the repository root, `python export_blog_results.py` assembles the complete original scoreboard and both learning-curve datasets, retaining source paths and distinguishing five-seed standard deviations from bootstrap intervals. It does not use fresh rerun scores in place of the originals.
+
 | Directory | Contents used by the article |
 |---|---|
 | `eurosat-13band-merge-val-false-20260901/` | Eight full-data backbone comparisons |
