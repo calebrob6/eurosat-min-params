@@ -21,3 +21,7 @@ __pycache__/
 /.gnhf/
 /.env
 /.env.*
+
+# Preserve imported result CSVs/manifests; local logs and lock files stay local.
+/experiments/imported/**/*.log
+/experiments/imported/**/*.lock

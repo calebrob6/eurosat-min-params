@@ -1,8 +1,72 @@
-# Exact EuroSAT runs with torchgeo-bench
+# EuroSAT backbone reproduction with TorchGeo-bench
 
-> These are **archived runs**, not a complete reproduction of the current article's external scoreboard. Only the DOFA Large linear row is on that scoreboard. `olmoearth_large.csv` is v1 Large (99.02%), not v1.2 Nano/Small/Base, and the separate benchmark ImageStats row (90.65%) is not our 90.96% baseline. The newer full-data and backbone fraction CSVs are missing; see [the article audit](../../REPRODUCIBILITY.md#external-benchmark-evidence-still-required).
+The article's original scoreboard and fraction CSVs have now been recovered under [`../imported/`](../imported/). Fresh runs in [`reproduced/`](reproduced/) independently evaluate all **11 backbone scoreboard rows** and **98 learning-curve points** using unmodified TorchGeo-bench APIs.
 
-These results were computed with [`torchgeo/torchgeo-bench`](https://github.com/torchgeo/torchgeo-bench) at commit `c95391940d58358dd4c522c31703ee12ac030357`.
+## Fresh reproduction
+
+Run from this repository's root on a CUDA GPU. This is separate from the CPU-only `reproduce.py` environment; pretrained weights and the cloned source are never added to Git.
+
+```bash
+git clone https://github.com/torchgeo/torchgeo-bench.git output/torchgeo-bench
+git -C output/torchgeo-bench checkout 9c8e4afab46675d7279c88828dfcbf0ca99b3a07
+python3.13 -m venv output/benchmark-env
+output/benchmark-env/bin/python -m pip install \
+  -r experiments/torchgeo_bench_eurosat/requirements.txt \
+  -c experiments/torchgeo_bench_eurosat/reproduced/environment-freeze.txt
+
+# Scoreboard-only models.
+output/benchmark-env/bin/python experiments/torchgeo_bench_eurosat/run.py --download \
+  --models earthloc moco resnet18 vit_base
+
+# The seven models plotted in the article, both split protocols and all fractions.
+output/benchmark-env/bin/python experiments/torchgeo_bench_eurosat/run.py --download \
+  --models resnet50 convnext_tiny dofa_base dofa_large olmoearth_nano olmoearth_small olmoearth_base \
+  --datasets eurosat eurosat-spatial --fractions
+
+python experiments/torchgeo_bench_eurosat/compare.py
+```
+
+Fresh measurements were made with Python 3.13.13, PyTorch 2.11.0+cu128, TorchGeo 0.10.0, timm 1.0.29, olmoearth-pretrain-minimal 0.0.6, and H100 NVL MIG GPUs. `reproduced/environment-freeze.txt` records all installed dependency versions. Per-model JSONs record resolved configs, physical bands, input size, GPU/runtime versions, frozen model-state hashes, extraction order, and embedding hashes.
+
+`reproduced/hf_weight_revisions.json` records the Hugging Face snapshots resolved for timm and OlmoEarth. TorchGeo weight-enum identifiers are in the model JSONs and their download URLs are defined by the pinned TorchGeo package. The upstream wrappers resolve pretrained weights themselves; record and compare the backbone-state hash if a remote model repository changes.
+
+`run.py` uses upstream `get_datasets`, model configuration/instantiation, `embed_split`, and `evaluate_logistic`. The only additions are source-index recording, checked embedding caches, nested fraction selection, and output/provenance handling. An untouched execution of the imported original fraction runner for ResNet-50 matched all six scores and selected Cs exactly; its output is `reproduced/original_runner_resnet50_control.csv`.
+
+The model weights are frozen. Images use all 13 bands except OlmoEarth, which omits unsupported B10. OlmoEarth uses native 64x64 inputs and its pretrained normalization; other models use 224x224 bilinear inputs and the configured BandSpec normalization. No embedding StandardScaler or L2 normalization is added beyond the upstream implementation.
+
+Fractions use **nested unstratified** seed-0 prefixes of a random permutation of the shuffled training embeddings, matching the original runner. This differs intentionally from our handcrafted models' five-seed stratified curves. Each backbone row selects C over the upstream 40-point `10^-6..10^4` grid on validation, fits on train only (`merge_val=false`), and reports test accuracy with 200 bootstrap resamples. The non-Olmo random full-data scoreboard used the training-loader order directly; OlmoEarth's full-data rows retain the permutation used by its fraction sweep, even in a full-only rerun. Full-data outputs for all models go under `reproduced/scoreboard/`, separately from the curve CSVs.
+
+Seed 0 does **not** imply the same subset across backbones: model initialization consumes Torch random state before the shuffled training loader runs. For example, the reproduced 162-image ResNet-50 subset shares only two images with the ConvNeXt-Tiny subset. This is inherited from the original runner; the new runner deliberately preserves it rather than silently changing the experiment. Subset hashes and cached sample filenames expose the difference. Bootstrap intervals cover test-image resampling, not uncertainty from these different training draws.
+
+Embedding files, including actual sample filenames in extraction order, are stored under `output/benchmark-embeddings/`. By default they are reused only when their SHA-256, source/config, sampling protocol, batch size, and package versions match. Pass `--fresh` to re-extract. Use `run.py --output output/my-benchmark` and then `compare.py --results-dir output/my-benchmark` to keep a new result set and its comparisons separate from the checked-in CSVs; `compare.py --scoreboard-only` skips curve comparison when only full-data models were rerun. Batch sizes match the original scoreboard manifest (OlmoEarth 32, DOFA Base 32/Large 16, timm ResNets/ConvNeXt 64, ViT and EarthLoc 32).
+
+## Original versus fresh scoreboard
+
+| Model | Article/original | Fresh | Correct-image difference / 5,400 |
+|---|---:|---:|---:|
+| EarthLoc ResNet-50 | 86.43% | 86.37% | -3 |
+| S2-all MoCo ResNet-50 | 92.78% | 92.80% | +1 |
+| ResNet-18 | 93.93% | 93.91% | -1 |
+| ResNet-50 | 94.96% | 95.07% | +6 |
+| ViT Base | 95.15% | 95.19% | +2 |
+| ConvNeXt-Tiny | 95.24% | 95.24% | 0 |
+| DOFA Base | 97.50% | 97.39% | -6 |
+| DOFA Large | 98.33% | 98.30% | -2 |
+| OlmoEarth v1.2 Nano | 96.89% | 96.89% | 0 |
+| OlmoEarth v1.2 Small | 98.65% | 98.67% | +1 |
+| OlmoEarth v1.2 Base | 98.80% | 98.80% | 0 |
+
+This is close numerical reproduction, **not universal bit-identical reproduction**. Every full-data difference is at most six images (0.1111 percentage points). The original environment was not completely locked; small numerical changes can also move the validation-selected C. No settings were chosen to minimize test differences.
+
+`reproduced/scoreboard_comparison.csv` and `reproduced/fraction_comparison.csv` pair every fresh number with its original CSV, selected C, and bootstrap bounds. Across 98 curve points, 22 match exactly and the largest difference is 0.4444 percentage points (24 images) at 1% spatial data for ConvNeXt-Tiny. All 98 fresh point estimates fall within the original bootstrap intervals; that is a descriptive comparison, not a formal equivalence test.
+
+Actual loaded backbone and probe counts are in every fresh row. In particular, the 13-band ViT has **87,764,736** backbone values rather than the article's rounded 12-band profiling count of 87.57M: one extra ViT patch-embedding channel adds 196,608 values, not merely a few thousand.
+
+## Older archived benchmark runs
+
+The top-level `dofa_large.csv`, `imagestats.csv`, and `olmoearth_large.csv` below predate the recovered article runs. The OlmoEarth row is **v1 Large**, not v1.2 Nano/Small/Base. The benchmark ImageStats row (90.65%) is not our independently standardized, 90.96% ImageStats baseline.
+
+These archived results were computed with [`torchgeo/torchgeo-bench`](https://github.com/torchgeo/torchgeo-bench) at commit `c95391940d58358dd4c522c31703ee12ac030357`.
 
 Every run uses the plain `eurosat` dataset wrapper and the same fixed split files as this repository:
 

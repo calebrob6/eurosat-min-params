@@ -30,7 +30,7 @@ python reproduce.py --download --refit-306 --fractions --check --output output/r
 
 This writes a new `output/refit/model_306.npz`, **not** a new feature selection. See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for the exact scope, article corrections, external-backbone evidence, environment sensitivity, and interpretation of the spatial and low-data experiments.
 
-**Article scope:** the local model table and both local learning curves reproduce. Most of the article's newer pretrained-backbone rows and backbone fraction plots still need their original run CSVs; `results/article_claims.csv` marks these as unsupported by the currently available artifacts. The article also needs the physical-band/percentile-label corrections documented in the reproduction notes before publication.
+**Article scope:** the local model table and both local learning curves reproduce exactly in the reference environment. Original pretrained-backbone outputs are now archived under `experiments/imported/`, and all 11 scoreboard rows plus 98 backbone curve points have been independently rerun. See [the backbone reproduction](experiments/torchgeo_bench_eurosat/README.md) for the pinned GPU environment and original-vs-fresh differences (at most 0.11 percentage points on the scoreboard). The article still needs the physical-band/percentile-label corrections documented in the reproduction notes.
 
 ## What is being counted?
 

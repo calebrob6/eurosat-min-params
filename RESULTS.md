@@ -40,3 +40,9 @@ The fixed descriptor combines per-band distributions, multiscale gradients, orie
 The original >96% candidate used 64 features and 585 reference-class parameters. Backward elimination, a regularization retune, a floating feature exchange, and a new region-shape feature reduced this to 33 features and 306 parameters. The final train CV scores were 96.20% for selection seeds 0-2, 96.15% for verification seeds 10-19, and 96.13% for seeds 30-39. These are overlapping repeated splits of the same training examples, not new held-out datasets.
 
 `experiments/*ceiling96*_result.txt` contains historical search traces. The release refit freezes the selected subset and does not claim to re-run that entire adaptive search. The learned checkpoint, raw image evaluation, and fraction experiments are the supported reproducibility targets.
+
+## Fresh frozen-backbone comparison
+
+All 11 article backbone rows and 98 fraction points have been independently rerun with pinned TorchGeo-bench source and a separate GPU environment. Original supplied results are in `experiments/imported/`; fresh results, model-state hashes, and side-by-side comparisons are in `experiments/torchgeo_bench_eurosat/reproduced/`. Full-data accuracy differs by at most 0.11 percentage points (six images), and the largest curve-point difference is 0.44 points.
+
+See [the benchmark reproduction guide](experiments/torchgeo_bench_eurosat/README.md) for the complete table, commands, and protocol caveats. The backbone curves use one nested unstratified sample sequence per model, not the five-seed stratified protocol of the local models; the fixed test-set bootstrap intervals do not cover training-subset variation.

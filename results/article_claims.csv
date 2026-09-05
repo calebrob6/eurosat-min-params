@@ -3,16 +3,16 @@ ImageStats,477,90.96,reproduced_raw_tiffs,results/eurosat_models.csv
 Ours 18 features,171,94.33,reproduced_raw_tiffs,submissions/12_reference_class_linear/model.npz
 Ours 30 features,279,95.37,reproduced_raw_tiffs,submissions/13_reference_class_95/model.npz
 Ours 33 features,306,96.04,reproduced_raw_tiffs,submissions/14_reference_class_96/model.npz
-torchgeo/earthloc_s2_resnet50,27.69M + 40970,86.43,article_only_missing_original_run,index.qmd scoreboard
-torchgeo/resnet50_s2_all_moco,23.54M + 20490,92.78,article_only_missing_original_run,index.qmd scoreboard
-timm/resnet18,11.20M + 5130,93.93,article_only_missing_original_run,index.qmd scoreboard
-timm/resnet50,23.54M + 20490,94.96,article_only_missing_original_run,index.qmd scoreboard
-timm/vit_base_patch16_224,87.57M + 7690,95.15,article_only_missing_original_run,index.qmd scoreboard
-timm/convnext_tiny,27.83M + 7690,95.24,article_only_missing_original_run,index.qmd scoreboard
-OlmoEarth v1.2 Nano,4.23M + 1290,96.89,article_only_missing_original_run,index.qmd scoreboard
-torchgeo/dofa_base,111.35M + 7690,97.50,article_only_missing_original_run,index.qmd scoreboard
-torchgeo/dofa_large,337.15M + 10250,98.33,archived_benchmark_csv_not_rerun,experiments/torchgeo_bench_eurosat/dofa_large.csv
-OlmoEarth v1.2 Small,78.63M + 3850,98.65,article_only_missing_original_run,index.qmd scoreboard
-OlmoEarth v1.2 Base,257.53M + 7690,98.80,article_only_missing_original_run,index.qmd scoreboard
+torchgeo/earthloc_s2_resnet50,27.69M + 40970,86.43,original_csv_and_fresh_close_reproduction,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+torchgeo/resnet50_s2_all_moco,23.54M + 20490,92.78,original_csv_and_fresh_close_reproduction,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+timm/resnet18,11.20M + 5130,93.93,original_csv_and_fresh_close_reproduction,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+timm/resnet50,23.54M + 20490,94.96,original_csv_and_fresh_close_reproduction,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+timm/vit_base_patch16_224,87.57M + 7690,95.15,original_csv_and_fresh_close_reproduction,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+timm/convnext_tiny,27.83M + 7690,95.24,original_csv_and_fresh_exact_score,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+OlmoEarth v1.2 Nano,4.23M + 1290,96.89,original_csv_and_fresh_exact_score,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+torchgeo/dofa_base,111.35M + 7690,97.50,original_csv_and_fresh_close_reproduction,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+torchgeo/dofa_large,337.15M + 10250,98.33,original_csv_and_fresh_close_reproduction,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+OlmoEarth v1.2 Small,78.63M + 3850,98.65,original_csv_and_fresh_close_reproduction,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
+OlmoEarth v1.2 Base,257.53M + 7690,98.80,original_csv_and_fresh_exact_score,experiments/torchgeo_bench_eurosat/reproduced/scoreboard_comparison.csv
 means only,,74.8,historical_note_only,ideas/2026-07-01_0100_initial_landscape.md
 means plus std,,87.8,historical_note_only,ideas/2026-07-01_0100_initial_landscape.md

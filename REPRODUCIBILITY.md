@@ -54,17 +54,18 @@ These are B11/B12/B09/B04/B01/B07 measurements, not the blue/green/NIR selection
 
 The complete RESISC45 state at commit `68480cb` is preserved on the remote `resisc45` branch. RESISC45 files are removed from the default release tree, not erased from Git history. Repository visibility is not changed by this preparation. MIT covers this code, not EuroSAT data, pretrained weights, or the separately maintained blog.
 
-## External benchmark evidence still required
+## External benchmark reproduction
 
-`results/article_claims.csv` distinguishes fresh raw-data reproduction from archived external evidence and article-only claims. It is **not** a new benchmark result table. Parameter strings on external rows are article quotations, not measurements made by the release runner.
+The original backbone experiment outputs were subsequently supplied under `experiments/imported/`. All 11 full-data article backbone rows and 98 learning-curve points have now been rerun using a fresh, unmodified TorchGeo-bench checkout at `9c8e4afab46675d7279c88828dfcbf0ca99b3a07`. See [`experiments/torchgeo_bench_eurosat/README.md`](experiments/torchgeo_bench_eurosat/README.md) for installation and run commands.
 
-The available `experiments/torchgeo_bench_eurosat/` directory contains only:
+The fresh GPU environment is separate from the pinned CPU-only environment above. JSON manifests record resolved model configs, bands, backbone-state hashes, sample order, runtime versions, and embedding hashes. The original and fresh scores remain in separate CSVs; `scoreboard_comparison.csv` and `fraction_comparison.csv` expose every difference rather than replacing the article's results.
 
-- `dofa_large.csv`: 98.33% on the full random EuroSAT split; matches the current article.
-- `imagestats.csv`: 90.65% from the separate TorchGeo-bench ImageStats implementation, **not** the locally reproduced 90.96% baseline.
-- `olmoearth_large.csv`: 99.02% for **OlmoEarth v1 Large**, **not** the article's v1.2 Nano/Small/Base rows.
-- `local_models_bootstrap.csv` and the older benchmark README.
+The historical backbone fraction runner used a seed-0 random permutation of **shuffled training embeddings**, taking progressively larger prefixes. These are nested **unstratified** subsets, unlike the five-seed stratified handcrafted/ImageStats curves. The new runner matches this protocol; an execution of the untouched imported runner with ResNet-50 matched all six new linear scores and selected Cs exactly.
 
-Original run outputs for EarthLoc, MoCo, timm ResNet/ViT/ConvNeXt, DOFA Base, and OlmoEarth v1.2 Nano/Small/Base are not in this checkout. Nor are the backbone learning-curve directories read by the article's `generate_fraction_plot.py`: `eurosat-train-fractions-20260901/`, `eurosat-spatial-train-fractions-20260901/`, and `olmoearth-train-fractions-20260901/`. The four DOFA/ResNet/ConvNeXt 100% random points are hardcoded by that plotting script.
+The backbone subsets are also model-dependent: initialization consumes Torch RNG state before the training loader shuffles, so the same nominal seed does not give each backbone identical training examples. The reproduced 1% ResNet-50 and ConvNeXt-Tiny subsets share two of 162 examples. This affects interpretation of low-data comparisons and is explicitly retained for historical reproduction.
 
-Consequently, the local 306-value/ImageStats curves in figures 7 and 8 reproduce, but the complete backbone-comparison figures and the other scoreboard rows cannot yet be claimed reproducible from this repository. Recover the original CSVs plus benchmark/config/weight revisions, or rerun and revise those external comparisons before asserting full-article reproducibility. Do not substitute the older OlmoEarth v1 Large CSV for a v1.2 result.
+Scores reproduce closely, not all bit-for-bit: maximum full-data difference is six of 5,400 images (0.1111 percentage points). ConvNeXt-Tiny, OlmoEarth v1.2 Nano, and OlmoEarth v1.2 Base match the original full-data scores exactly. The maximum curve difference is 0.4444 percentage points at 1% spatial data for ConvNeXt-Tiny. All 98 new curve scores fall within the original bootstrap intervals, which is descriptive agreement rather than proof of statistical equivalence.
+
+`results/article_claims.csv` points to the recovered source evidence and comparison. The older top-level `olmoearth_large.csv` remains a different v1 Large experiment (99.02%), not a substitute for the v1.2 models. The top-level TorchGeo-bench ImageStats result (90.65%) is likewise distinct from the locally reproduced 90.96% baseline.
+
+Actual loaded 13-band backbone counts are saved in the fresh CSVs. The article's ViT parameter footnote needs a correction: adding the thirteenth patch-embedding channel costs **196,608 values**, not a few thousand. The fresh ViT count is **87,764,736**, compared with the rounded 12-band profiling figure of 87.57M.

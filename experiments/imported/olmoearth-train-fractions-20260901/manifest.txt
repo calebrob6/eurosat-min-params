@@ -1,0 +1,8 @@
+datasets=eurosat,eurosat-spatial
+bands=all (13 loaded; OlmoEarth skips unsupported B10 cirrus)
+eval.merge_val=false
+seed=0
+normal_fractions=1%,2%,5%,10%,20%,50%
+normal_100pct_linear_models=olmoearth_v1_2_nano,olmoearth_v1_2_tiny,olmoearth_v1_2_small,olmoearth_v1_2_base
+spatial_fractions=1%,2%,5%,10%,20%,50%,100%
+models=olmoearth_nano,olmoearth_tiny,olmoearth_base,olmoearth_large,olmoearth_v1_1_nano,olmoearth_v1_1_tiny,olmoearth_v1_1_base,olmoearth_v1_2_nano,olmoearth_v1_2_tiny,olmoearth_v1_2_small,olmoearth_v1_2_base,olmoearth_nano_t1,olmoearth_nano_t6
