@@ -380,20 +380,13 @@ def lbp(x: torch.Tensor) -> torch.Tensor:
     return torch.stack((entropy, hist[..., :9].sum(-1)), -1).flatten(1)
 
 
-def tail_anisotropy(ndvi: torch.Tensor) -> torch.Tensor:
-    """Measure spatial anisotropy weighted by the low NDVI quartile deficit.
-
-    Args:
-        ndvi: NDVI maps of shape ``(N, 64, 64)``.
-
-    Returns:
-        Weighted spatial-covariance anisotropy of shape ``(N,)``.
-    """
-    flat = ndvi.flatten(-2)
-    q25 = percentile(flat, 25)
-    weights = (q25[..., None] - flat).clamp_min(0)
-    coords = torch.linspace(-1, 1, 64, dtype=torch.float32, device=flat.device)
-    yy, xx = torch.meshgrid(coords, coords, indexing='ij')
+def _weighted_region_shape(
+    weights: torch.Tensor, height: int, width: int
+) -> torch.Tensor:
+    """Measure anisotropy and spread for flattened spatial weights."""
+    coords_y = torch.linspace(-1, 1, height, dtype=torch.float32, device=weights.device)
+    coords_x = torch.linspace(-1, 1, width, dtype=torch.float32, device=weights.device)
+    yy, xx = torch.meshgrid(coords_y, coords_x, indexing='ij')
     xx, yy = xx.flatten(), yy.flatten()
     mass = weights.sum(-1) + EPS
     mean_x, mean_y = ((weights * coord).sum(-1) / mass for coord in (xx, yy))
@@ -401,4 +394,45 @@ def tail_anisotropy(ndvi: torch.Tensor) -> torch.Tensor:
     sxx, syy, sxy = (
         (weights * a * b).sum(-1) / mass for a, b in ((dx, dx), (dy, dy), (dx, dy))
     )
-    return ((sxx - syy).square() + 4 * sxy * sxy).sqrt() / (sxx + syy + EPS)
+    trace = sxx + syy
+    anisotropy = ((sxx - syy).square() + 4 * sxy * sxy).sqrt() / (trace + EPS)
+    return torch.stack((anisotropy, trace.sqrt()), -1)
+
+
+def tail_region_shape(channels: torch.Tensor) -> torch.Tensor:
+    """Measure low/high spectral-tail anisotropy and spread.
+
+    Args:
+        channels: Structural maps of shape ``(N, C, H, W)``.
+
+    Returns:
+        Tensor of shape ``(N, 4 * C)``. Each channel contributes low-tail
+        anisotropy and spread followed by high-tail anisotropy and spread.
+    """
+    height, width = channels.shape[-2:]
+    flat = channels.flatten(-2)
+    quartiles = percentile(flat, [25, 75])
+    weights = torch.stack(
+        (
+            (quartiles[..., 0, None] - flat).clamp_min(0),
+            (flat - quartiles[..., 1, None]).clamp_min(0),
+        ),
+        -2,
+    )
+    return _weighted_region_shape(weights, height, width).flatten(1)
+
+
+def tail_anisotropy(ndvi: torch.Tensor) -> torch.Tensor:
+    """Measure spatial anisotropy weighted by the low NDVI quartile deficit.
+
+    Args:
+        ndvi: NDVI maps of shape ``(N, H, W)``.
+
+    Returns:
+        Weighted spatial-covariance anisotropy of shape ``(N,)``.
+    """
+    height, width = ndvi.shape[-2:]
+    flat = ndvi.flatten(-2)
+    q25 = percentile(flat, 25)
+    weights = (q25[..., None] - flat).clamp_min(0)
+    return _weighted_region_shape(weights, height, width)[..., 0]

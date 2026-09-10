@@ -56,7 +56,7 @@ def main() -> None:
         nargs='+',
         help='TIFF files or directories searched recursively',
     )
-    parser.add_argument('--features', choices=('33', '377', '52'), default='33')
+    parser.add_argument('--features', choices=('33', '377', '389', '52'), default='33')
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--output', type=Path, required=True)

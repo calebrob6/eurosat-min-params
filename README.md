@@ -24,7 +24,7 @@ Use `--torch-backend cpu` for a CPU-only install. The module itself only needs P
 import torch
 from eurosat_features import EuroSATFeatures
 
-extractor = EuroSATFeatures("33")  # or "377" for the full pool, "52" for ImageStats
+extractor = EuroSATFeatures("33")  # or "377", "389", or "52"
 images = torch.rand(8, 13, 64, 64) * 10000
 features = extractor(images)  # (8, 33)
 
@@ -33,6 +33,8 @@ logits = model(images)
 ```
 
 Move the module and input to CUDA to use a GPU. Outputs are float32 tensors on the input device. The extractor has no learned weights or image gradients; the classifier can be trained normally.
+
+`"377"` preserves the historical feature pool. `"389"` is the extended optimization pool used by the full-pool importance experiment: the same 377 columns followed by all 12 low/high pan, NDVI, and NDBI region-shape measurements. `"52"` selects ImageStats.
 
 Inputs must be 13-band 64x64 patches at the original pixel scale. The order matches `torchgeo.datasets.EuroSAT.all_band_names` and an untransformed dataset with default `bands`:
 
@@ -45,7 +47,7 @@ TorchGeo returns those TIFF channels unchanged as float32. Explicit band selecti
 To extract files:
 
 ```bash
-python extract_features.py path/to/patches/ --features 33 --output output/features.npz
+python extract_features.py path/to/patches/ --features 389 --output output/features.npz
 ```
 
 The file contains `features`, `filenames`, and `feature_names`. Add `--device cuda:0` for GPU extraction.
@@ -69,6 +71,8 @@ The basic RGB comparison is also on `main`:
 ```
 
 That runs ImageStats and the fixed 33-feature RESISC45 model. For pretrained embeddings and combined classifiers, follow [the embedding comparison](experiments/representation_overlap/README.md). `python export_blog_results.py` exports the saved current-model tables without training.
+
+To rank all 389 EuroSAT features—including every spectral-tail region-shape measurement—and trace regularized logistic-regression accuracy while recursively removing the five least-important features, run `.venv-reproduce/bin/python -m experiments.feature_importance.run --download`. See the [full-pool feature-importance experiment](experiments/feature_importance/README.md) for its protocol and outputs.
 
 ## Files
 

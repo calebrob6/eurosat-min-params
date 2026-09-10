@@ -55,16 +55,16 @@ class FeatureCLITests(unittest.TestCase):
                 str(ROOT / 'extract_features.py'),
                 str(path),
                 '--features',
-                '33',
+                '389',
                 '--output',
                 str(output),
             ]
             subprocess.run(
                 command, cwd=ROOT, check=True, capture_output=True, text=True
             )
-            extractor = EuroSATFeatures('33')
+            extractor = EuroSATFeatures('389')
             with np.load(output, allow_pickle=False) as result:
-                self.assertEqual(result['features'].shape, (1, 33))
+                self.assertEqual(result['features'].shape, (1, 389))
                 self.assertEqual(
                     result['feature_names'].tolist(), list(extractor.feature_names)
                 )

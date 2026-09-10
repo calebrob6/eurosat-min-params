@@ -1,0 +1,55 @@
+{
+  "C_grid": [
+    0.03,
+    0.1,
+    0.3,
+    1.0,
+    3.0,
+    10.0,
+    30.0,
+    100.0,
+    300.0
+  ],
+  "best_validation": {
+    "C": 1.0,
+    "elimination_round": 33,
+    "features_kept": 224,
+    "max_iterations_used": 143,
+    "reference_class_parameters": 2025,
+    "test_accuracy": 0.970925925925926,
+    "train_accuracy": 0.9882098765432099,
+    "validation_accuracy": 0.9705555555555555
+  },
+  "final": {
+    "C": 300.0,
+    "elimination_round": 77,
+    "features_kept": 4,
+    "max_iterations_used": 209,
+    "reference_class_parameters": 45,
+    "test_accuracy": 0.7051851851851851,
+    "train_accuracy": 0.7026543209876543,
+    "validation_accuracy": 0.6996296296296296
+  },
+  "frontier33_refit": {
+    "C": 3.0,
+    "features_kept": 33,
+    "max_iterations_used": 117,
+    "reference_class_parameters": 306,
+    "test_accuracy": 0.9603703703703703,
+    "train_accuracy": 0.967283950617284,
+    "validation_accuracy": 0.9616666666666667
+  },
+  "full_pool": {
+    "C": 0.1,
+    "elimination_round": 0,
+    "features_kept": 389,
+    "max_iterations_used": 138,
+    "reference_class_parameters": 3510,
+    "test_accuracy": 0.9675925925925926,
+    "train_accuracy": 0.9812345679012345,
+    "validation_accuracy": 0.9668518518518519
+  },
+  "importance_definition": "L2 norm across class coefficients after train-fitted per-feature standardization",
+  "regularization_selection": "validation-tuned independently at every retained-feature count",
+  "removal_rule": "refit and remove the 5 least-important active features"
+}

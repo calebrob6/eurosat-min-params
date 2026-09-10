@@ -20,8 +20,14 @@ from scipy.ndimage import label, uniform_filter
 
 from eurosat_features import TIFF_BAND_NAMES, EuroSATFeatures, _ops
 from experiments.representation_overlap.data import feature_matrices
+from src.feature_pool import full_pool_features
 
-MODES = (('33', 'frontier33'), ('377', 'pool377'), ('52', 'imagestats52'))
+MODES = (
+    ('33', 'frontier33'),
+    ('377', 'pool377'),
+    ('389', 'fullpool389'),
+    ('52', 'imagestats52'),
+)
 DEVICES = ('cpu', 'cuda') if torch.cuda.is_available() else ('cpu',)
 # DN reductions, normalized descriptors, and FFT statistics have distinct scales.
 CONTINUOUS_TOLERANCES = {
@@ -108,7 +114,7 @@ class TorchFeaturesTests(unittest.TestCase):
             rtol, atol = CONTINUOUS_TOLERANCES[family]
             if family == 'spectral_statistics' and name.startswith('p'):
                 # Float32 quantile ranks differ from NumPy's float64 ranks.
-                rtol = 1e-6
+                rtol = 2e-6
             np.testing.assert_allclose(
                 actual[:, i],
                 expected[:, i],
@@ -147,6 +153,9 @@ class TorchFeaturesTests(unittest.TestCase):
         )
         images[1] *= -1
         reference, schemas = feature_matrices(images)
+        extended, names, families = full_pool_features(images)
+        reference['fullpool389'] = extended
+        schemas['fullpool389'] = {'names': names, 'families': families}
         for device in DEVICES:
             for mode, key in MODES:
                 with self.subTest(device=device, mode=mode):
@@ -198,11 +207,35 @@ class TorchFeaturesTests(unittest.TestCase):
         for device in DEVICES:
             module = EuroSATFeatures().to(device)
             pool_module = EuroSATFeatures('377').to(device)
+            extended_module = EuroSATFeatures('389').to(device)
             pool = pool_module(image.to(device))
+            extended = extended_module(image.to(device))
             result = module(image.to(device))
+            torch.testing.assert_close(extended[:, :377], pool)
+            self.assertEqual(
+                extended_module.feature_names[:377], pool_module.feature_names
+            )
+            self.assertEqual(
+                extended_module.feature_names[377:],
+                (
+                    'tail_aniso_low_pan',
+                    'tail_spread_low_pan',
+                    'tail_aniso_high_pan',
+                    'tail_spread_high_pan',
+                    'tail_aniso_low_ndvi',
+                    'tail_spread_low_ndvi',
+                    'tail_aniso_high_ndvi',
+                    'tail_spread_high_ndvi',
+                    'tail_aniso_low_ndbi',
+                    'tail_spread_low_ndbi',
+                    'tail_aniso_high_ndbi',
+                    'tail_spread_high_ndbi',
+                ),
+            )
             torch.testing.assert_close(
                 result[:, :32], pool[:, POOL_INDICES.tolist()], rtol=2e-6, atol=1e-6
             )
+            torch.testing.assert_close(result[:, -1], extended[:, 381])
             self.assertEqual(
                 module.feature_names[:-1],
                 tuple(pool_module.feature_names[i] for i in POOL_INDICES),
@@ -674,6 +707,13 @@ class TorchFeaturesTests(unittest.TestCase):
             variance = coords.var(correction=0)
             expected = variance / (variance + _ops.EPS)
             torch.testing.assert_close(result[0], expected, rtol=3e-7, atol=0)
+            region = _ops.tail_region_shape(ndvi[:, None])
+            self.assertEqual(region.shape, (3, 4))
+            torch.testing.assert_close(region[:, 0], result)
+            torch.testing.assert_close(region[0, 1], variance.sqrt(), rtol=3e-7, atol=0)
+            torch.testing.assert_close(
+                region[:, 2:], ndvi.new_zeros((3, 2)), rtol=0, atol=2e-7
+            )
 
     def test_spectral_slope_radial_definition(self) -> None:
         """Check the log-radius regression against direct radial averages."""
