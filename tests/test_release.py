@@ -13,7 +13,7 @@ from reproduce import (
     MODEL_PATH, check_results, evaluate, extract_features, fitted_reference,
     learning_curves, write_csv,
 )
-from src.data import iter_images
+from src.data import BAND_NAMES, B_SWIR1, B_SWIR2, TIFF_BAND_NAMES, iter_images
 from src.features import patch_features
 from src.frontier import CORE_CONFIG, RECIPE, frontier_features
 from src.linmodel import predict, predict_reference_class, to_reference_class
@@ -22,6 +22,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_band_labels_are_physical_without_changing_legacy_indices(self):
+        expected = [
+            'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
+            'B08', 'B09', 'B10', 'B11', 'B12', 'B8A',
+        ]
+        self.assertEqual(BAND_NAMES, expected)
+        self.assertEqual(TIFF_BAND_NAMES, expected)
+        self.assertEqual((B_SWIR1, B_SWIR2), (11, 12))
+        with np.load(MODEL_PATH, allow_pickle=False) as model:
+            self.assertEqual(BAND_NAMES, model['tiff_band_names'].tolist())
+            np.testing.assert_array_equal(model['legacy_swir_indices'], [B_SWIR1, B_SWIR2])
+
     def test_percentile_names_match_values(self):
         images = np.random.default_rng(0).uniform(1, 100, (2, 13, 64, 64)).astype(np.float32)
         features, names = patch_features(images, grad_scales=0)

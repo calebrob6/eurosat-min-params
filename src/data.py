@@ -5,9 +5,8 @@ The EuroSAT dataset ships as 27,000 64x64 patches with 13 Sentinel-2 bands each
 text files listing ``<Class>_<id>.jpg`` filenames; we map those to the
 corresponding 13-band ``.tif`` files.
 
-Historical feature-code aliases (NOT TorchGeo's actual TIFF band order):
-    0:B01 1:B02(blue) 2:B03(green) 3:B04(red) 4:B05 5:B06 6:B07
-    7:B08(nir) 8:B08A 9:B09 10:B10 11:B11(swir1) 12:B12(swir2)
+Band-name lists describe the physical TIFF channels. Historical numeric SWIR
+aliases below retain their trained positions independently of those labels.
 """
 
 from __future__ import annotations
@@ -36,16 +35,11 @@ CLASSES = [
 CLASS_TO_IDX = {c: i for i, c in enumerate(CLASSES)}
 NUM_CLASSES = len(CLASSES)
 
-BAND_NAMES = [
-    'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
-    'B08', 'B08A', 'B09', 'B10', 'B11', 'B12',
-]
-# Physical TIFF order. Existing model arithmetic uses the historical aliases
-# below; silently changing their indices would invalidate every checkpoint.
 TIFF_BAND_NAMES = [
     'B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
     'B08', 'B09', 'B10', 'B11', 'B12', 'B8A',
 ]
+BAND_NAMES = TIFF_BAND_NAMES
 # Legacy SWIR aliases index B12 and B8A, respectively. See REPRODUCIBILITY.md.
 B_BLUE, B_GREEN, B_RED, B_NIR, B_SWIR1, B_SWIR2 = 1, 2, 3, 7, 11, 12
 
