@@ -7,12 +7,12 @@ from pathlib import Path
 
 import numpy as np
 
-from experiments.directional_index_lib import index_coherence
-from experiments.gstruct2_features_lib import blob_features, lbp_features, sslope_features
-from experiments.index_texture_lib import index_texture_scale2
-from experiments.orthogonal_features_lib import orient_entropy_scale2, xband_corr
 from reproduce import CHECKSUMS, prepare_data
 from src.data import CLASSES, DATA_ROOT, TIFF_BAND_NAMES, iter_images, list_split
+from src.extra_features import (
+    blob_features, index_coherence, index_texture_scale2, lbp_features,
+    orient_entropy_scale2, sslope_features, xband_corr,
+)
 from src.features import patch_features
 from src.frontier import CORE_CONFIG, POOL_INDICES, frontier_features
 
@@ -24,9 +24,7 @@ from .protocol import (
 logger = logging.getLogger(__name__)
 SOURCE_FILES = (
     'src/data.py', 'src/features.py', 'src/frontier.py',
-    'experiments/directional_index_lib.py', 'experiments/gstruct2_features_lib.py',
-    'experiments/index_texture_lib.py', 'experiments/orthogonal_features_lib.py',
-    'experiments/region_shape_ceiling96.py', 'experiments/representation_overlap/data.py',
+    'src/extra_features.py', 'experiments/representation_overlap/data.py',
 )
 CORE_GROUPS = (
     ('spectral_statistics', 91), ('multiscale_gradients', 78), ('coherence', 26),
@@ -173,7 +171,7 @@ def prepare(cache: Path, batch_size: int = 128, *, download: bool = False) -> No
                      **{rep: np.concatenate(parts) for rep, parts in reps.items()})
     if len(set(all_names)) != sum(SIZES.values()):
         raise ValueError('canonical splits overlap')
-    with np.load(ROOT / 'submissions/14_reference_class_96/model.npz', allow_pickle=False) as model:
+    with np.load(ROOT / 'models/eurosat_33.npz', allow_pickle=False) as model:
         if schema['frontier33']['names'] != model['feature_names'].tolist():
             raise ValueError('frontier names differ from the published checkpoint')
     write_json(manifest_path, {

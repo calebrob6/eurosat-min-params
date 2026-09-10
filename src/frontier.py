@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from experiments.gstruct2_features_lib import blob_features, lbp_features
-from experiments.index_texture_lib import index_texture_scale2
-from experiments.orthogonal_features_lib import orient_entropy_scale2
-from experiments.region_shape_ceiling96 import tail_region_shape
+from .extra_features import (
+    blob_features, index_texture_scale2, lbp_features,
+    orient_entropy_scale2, tail_region_shape,
+)
 from .features import patch_features
 
 RECIPE = 'eurosat306-v1-historical-channels'

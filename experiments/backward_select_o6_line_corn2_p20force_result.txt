@@ -1,7 +1,0 @@
-POOL=o6+line+corn2 dim=320 START=42 STOP=19 SELECT=20..29 VERIFY=30..39
-   k  params   selCV   verCV     val    test     dropped
-  54     550 -1.0000 -1.0000 -1.0000 -1.0000  ixcoh_in_set=15
-      -> drop 310* (selCV_after=0.9566)
-  53     540 -1.0000 -1.0000 -1.0000 -1.0000  ixcoh_in_set=14
-      -> drop 77 (selCV_after=0.9569)
-  52     530 -1.0000 -1.0000 -1.0000 -1.0000  ixcoh_in_set=14

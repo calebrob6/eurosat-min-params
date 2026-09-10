@@ -1,0 +1,5 @@
+model,split,features,learned_parameters,C,n_images,correct,accuracy
+imagestats,val,12,572,30,6300,2289,0.36333333333333334
+imagestats,test,12,572,30,6300,2305,0.36587301587301585
+selected33,val,33,1496,30.0,6300,3860,0.6126984126984127
+selected33,test,33,1496,30.0,6300,3721,0.5906349206349206

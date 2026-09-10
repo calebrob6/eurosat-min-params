@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -13,6 +13,21 @@ from experiments.representation_overlap.protocol import REPRESENTATIONS, write_j
 
 
 class PipelineTests(unittest.TestCase):
+    def test_all_stage_keeps_selection_before_test_evaluation(self):
+        calls = Mock()
+        with (
+            patch.object(run, 'select', calls.select),
+            patch.object(run, 'lock_selection', calls.lock),
+            patch.object(run, 'evaluate', calls.evaluate),
+            patch.object(data, 'prepare', calls.prepare),
+            patch.object(report, 'export', calls.export),
+            patch.object(run.logging, 'basicConfig'),
+            patch('sys.argv', ['run', 'all']),
+        ):
+            run.main()
+        self.assertEqual([entry[0] for entry in calls.mock_calls],
+                         ['prepare', 'select', 'lock', 'evaluate', 'export'])
+
     def test_pilot_cannot_be_locked(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)

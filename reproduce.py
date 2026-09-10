@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Reproduce the EuroSAT article from TIFFs without historical feature caches."""
+"""Evaluate the fixed 33-feature EuroSAT model and fit ImageStats from TIFFs."""
 from __future__ import annotations
 
 import os
@@ -27,7 +27,6 @@ import sklearn
 from sklearn.model_selection import StratifiedShuffleSplit
 
 from src.data import CLASSES, DATA_ROOT, TIFF_BAND_NAMES, iter_images, list_split
-from src.features import patch_features
 from src.frontier import CORE_CONFIG, POOL_INDICES, RECIPE, frontier_features
 from src.linmodel import fit_folded_logreg, predict, predict_reference_class, to_reference_class
 
@@ -49,7 +48,7 @@ BASELINE_CS = (
     0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3,
     1, 3, 10, 30, 100, 150, 200, 250, 300, 400, 500, 700, 1000, 2000,
 )
-MODEL306 = ROOT / 'submissions/14_reference_class_96/model.npz'
+MODEL_PATH = ROOT / 'models/eurosat_33.npz'
 
 
 def digest(path: Path) -> str:
@@ -72,6 +71,7 @@ def download(path: Path) -> None:
 
 
 def prepare_data(allow_download: bool, spatial: bool) -> None:
+    """Verify the fixed splits and original TIFFs, downloading when requested."""
     root = Path(DATA_ROOT)
     root.mkdir(parents=True, exist_ok=True)
     for name, checksum in CHECKSUMS.items():
@@ -111,17 +111,19 @@ def write_csv(path: Path, rows: list[dict]) -> None:
 
 
 def extract_features(batch_size: int, output: Path) -> dict:
-    """Always read TIFFs, never data/cache or previously derived features."""
+    """Compute the fixed 33 features and ImageStats from original TIFF batches."""
+    if batch_size < 1:
+        raise ValueError('batch_size must be positive')
     result = {}
     feature_names = None
     for split, expected_size in zip(SPLITS, SIZES, strict=True):
         paths, labels = list_split(split)
-        if len(paths) != expected_size or len(set(paths)) != expected_size:
+        if (len(paths) != expected_size or len(labels) != expected_size
+                or len(set(paths)) != expected_size):
             raise ValueError(f'{split} split membership is invalid')
-        core_parts, frontier_parts, stats_parts = [], [], []
+        frontier_parts, stats_parts = [], []
         for images, _ in iter_images(split, batch_size):
-            core = patch_features(images, **CORE_CONFIG)
-            frontier, names = frontier_features(images, core)
+            frontier, names = frontier_features(images)
             if feature_names is not None and feature_names != names:
                 raise ValueError('feature names changed between batches')
             feature_names = names
@@ -129,22 +131,21 @@ def extract_features(batch_size: int, output: Path) -> dict:
             statistics = np.stack(
                 (flat.mean(2), flat.std(2), flat.min(2), flat.max(2)), axis=2
             ).reshape(len(images), 52)
-            core_parts.append(core[0])
             frontier_parts.append(frontier)
             stats_parts.append(statistics)
         result[split] = {
-            'core': np.concatenate(core_parts),
             'frontier': np.concatenate(frontier_parts),
             'imagestats': np.concatenate(stats_parts),
             'labels': labels,
             'filenames': np.asarray([Path(path).name for path in paths]),
         }
-        if any(not np.isfinite(result[split][key]).all()
-               for key in ('core', 'frontier', 'imagestats')):
-            raise ValueError(f'{split} features contain non-finite values')
+        if any(len(result[split][key]) != expected_size
+               or not np.isfinite(result[split][key]).all()
+               for key in ('frontier', 'imagestats')):
+            raise ValueError(f'{split} features have an invalid size or non-finite values')
         print(f'{split}: extracted {expected_size} TIFFs', flush=True)
     universe = np.concatenate([result[split]['filenames'] for split in SPLITS])
-    if len(np.unique(universe)) != 27000:
+    if len(np.unique(universe)) != sum(SIZES):
         raise ValueError('random splits overlap')
     result['feature_names'] = feature_names
     write_csv(output / 'features_306.csv', [
@@ -156,6 +157,7 @@ def extract_features(batch_size: int, output: Path) -> dict:
 
 
 def fitted_reference(x: np.ndarray, y: np.ndarray, C: float) -> tuple:
+    """Fit on training data and fold the scaler into a reference-class head."""
     w, b, indices = fit_folded_logreg(x, y, C=C)
     wr, br = to_reference_class(w, b)
     return wr, br, indices
@@ -166,6 +168,7 @@ def prediction(features: np.ndarray, model: tuple) -> np.ndarray:
 
 
 def evaluate(data: dict, output: Path, refit: bool) -> None:
+    """Evaluate final33 and select ImageStats C using validation accuracy only."""
     rows, per_class = [], []
 
     def record(name: str, split: str, features: np.ndarray, model: tuple) -> None:
@@ -182,34 +185,31 @@ def evaluate(data: dict, output: Path, refit: bool) -> None:
                                   images=int(mask.sum()),
                                   accuracy=float((predicted[mask] == labels[mask]).mean())))
 
-    for folder, name in [('12_reference_class_linear', '171'), ('13_reference_class_95', '279')]:
-        with np.load(ROOT / f'submissions/{folder}/model.npz', allow_pickle=False) as m:
-            model = (m['W'], m['b'], m['feature_idx'])
-            if int(m['ref_class']) != 0:
-                raise ValueError('unexpected reference class')
-            for key, value in CORE_CONFIG.items():
-                if key in m and not np.array_equal(m[key], value):
-                    raise ValueError(f'{folder}: different extraction configuration')
-        for split in ('val', 'test'):
-            record(name, split, data[split]['core'], model)
-
     if refit:
+        destination = output / 'eurosat_33.npz'
+        if destination.resolve() == MODEL_PATH.resolve():
+            raise ValueError('refit output must not overwrite the checked-in checkpoint')
         model = fitted_reference(data['train']['frontier'], data['train']['labels'], 3.0)
-        cfg = dict(CORE_CONFIG)
         np.savez_compressed(
-            output / 'model_306.npz', W=model[0], b=model[1], feature_idx=model[2],
-            params=306, k=33, C=3.0, ref_class=0, recipe=RECIPE, **cfg,
+            destination, W=model[0], b=model[1], feature_idx=model[2],
+            params=306, k=33, C=3.0, ref_class=0, recipe=RECIPE, **CORE_CONFIG,
             feature_names=np.asarray(data['feature_names']),
             historical_pool_indices=np.append(POOL_INDICES, 381),
             tiff_band_names=np.asarray(TIFF_BAND_NAMES), legacy_swir_indices=[11, 12],
         )
     else:
-        with np.load(MODEL306, allow_pickle=False) as m:
-            if str(m['recipe']) != RECIPE or m['feature_names'].tolist() != data['feature_names']:
-                raise ValueError('306 model recipe does not match feature schema')
+        with np.load(MODEL_PATH, allow_pickle=False) as m:
+            if (str(m['recipe']) != RECIPE or int(m['ref_class']) != 0
+                    or m['feature_names'].tolist() != data['feature_names']):
+                raise ValueError('33-feature model recipe does not match feature schema')
+            for key, value in CORE_CONFIG.items():
+                if not np.array_equal(m[key], value):
+                    raise ValueError(f'33-feature model has a different {key} configuration')
             model = (m['W'], m['b'], m['feature_idx'])
-    if model[0].size + model[1].size != 306:
-        raise ValueError('306-value checkpoint has an incorrect parameter count')
+    if (model[0].shape != (9, 33) or model[1].shape != (9,)
+            or not np.array_equal(model[2], np.arange(33))
+            or not np.isfinite(model[0]).all() or not np.isfinite(model[1]).all()):
+        raise ValueError('33-feature checkpoint has invalid weights or feature indices')
     for split in ('val', 'test'):
         record('306', split, data[split]['frontier'], model)
 
@@ -230,21 +230,25 @@ def evaluate(data: dict, output: Path, refit: bool) -> None:
 
 
 def learning_curves(data: dict, output: Path) -> None:
+    """Fit five training subsamples per fraction with fixed C on both splits."""
     names = np.concatenate([data[s]['filenames'] for s in SPLITS])
     labels = np.concatenate([data[s]['labels'] for s in SPLITS])
     lookup = {name: i for i, name in enumerate(names)}
     spatial = {}
     for split, size in zip(SPLITS, SIZES, strict=True):
         path = Path(DATA_ROOT) / f'eurosat-spatial-{split}.txt'
-        spatial[split] = np.asarray([
-            lookup[Path(line.strip()).with_suffix('.tif').name]
-            for line in path.read_text().splitlines() if line.strip()
-        ])
+        members = [Path(line.strip()).with_suffix('.tif').name
+                   for line in path.read_text().splitlines() if line.strip()]
+        unknown = set(members) - lookup.keys()
+        if unknown:
+            raise ValueError(f'{path.name}: unknown image {min(unknown)}')
+        spatial[split] = np.asarray([lookup[name] for name in members])
         if len(spatial[split]) != size:
             raise ValueError('wrong spatial split size')
-    if len(np.unique(np.concatenate(list(spatial.values())))) != 27000:
+    if len(np.unique(np.concatenate(list(spatial.values())))) != len(names):
         raise ValueError('spatial splits overlap or omit samples')
-    random = {'train': np.arange(16200), 'test': np.arange(21600, 27000)}
+    random = {'train': np.arange(len(data['train']['labels'])),
+              'test': np.arange(len(names) - len(data['test']['labels']), len(names))}
     for family, C, parameters in [('frontier', 3.0, 306), ('imagestats', 300.0, 477)]:
         features = np.concatenate([data[s][family] for s in SPLITS])
         rows = []
@@ -277,7 +281,7 @@ def learning_curves(data: dict, output: Path) -> None:
 
 
 def check_results(output: Path, fractions: bool) -> None:
-    """Fail rather than silently accepting a different published result."""
+    """Compare current metrics, feature order, and requested curves to results."""
     for generated, published in [
         ('models.csv', 'eurosat_models.csv'),
         ('per_class.csv', 'eurosat_per_class.csv'),
@@ -286,14 +290,15 @@ def check_results(output: Path, fractions: bool) -> None:
     ]:
         with (ROOT / 'results' / published).open() as handle:
             expected = list(csv.DictReader(handle))
+        if generated in ('models.csv', 'per_class.csv'):
+            expected = [row for row in expected if row['model'] in ('306', 'imagestats')]
         with (output / generated).open() as handle:
             actual = list(csv.DictReader(handle))
         if actual != expected:
             raise ValueError(f'results differ from results/{published}')
     if fractions:
-        for family, source in [('frontier', 'eval_training_fractions_result.csv'),
-                               ('imagestats', 'eval_imagestats_fractions_result.csv')]:
-            with (ROOT / 'experiments' / source).open() as handle:
+        for family in ('frontier', 'imagestats'):
+            with (ROOT / 'results' / f'{family}_fractions.csv').open() as handle:
                 expected_rows = list(csv.DictReader(handle))
             with (output / f'{family}_fractions.csv').open() as handle:
                 actual_rows = list(csv.DictReader(handle))
@@ -301,23 +306,28 @@ def check_results(output: Path, fractions: bool) -> None:
                 raise ValueError(f'{family}: wrong number of curve rows')
             for wanted, got in zip(expected_rows, actual_rows, strict=True):
                 if (wanted['split_protocol'] != got['split_protocol']
-                        or float(wanted['train_fraction_percent']) != float(got['train_fraction_percent'])):
+                        or float(wanted['train_fraction_percent']) != float(got['train_fraction_percent'])
+                        or int(wanted['n_train']) != int(got['n_train'])
+                        or int(wanted['n_test']) != int(got['n_test'])
+                        or int(wanted['learned_parameters']) != int(got['parameters'])
+                        or float(wanted['regularization_C']) != float(got['C'])):
                     raise ValueError(f'{family}: mismatched split/fraction')
                 metrics = [f'seed_{i}_test_accuracy' for i in range(5)]
                 metrics += ['test_accuracy_mean', 'test_accuracy_stdev']
                 for metric in metrics:
-                    if abs(float(wanted[metric]) - float(got[metric])) > 1e-6:
+                    value = float(got[metric])
+                    if not np.isfinite(value) or abs(float(wanted[metric]) - value) > 1e-6:
                         raise ValueError(f'{family} {got["split_protocol"]} '
                                          f'{got["train_fraction_percent"]}%: {metric} differs')
-    print('Published local model counts and requested learning curves reproduced.', flush=True)
+    print('Current local results and requested learning curves match.', flush=True)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--download', action='store_true')
     parser.add_argument('--fractions', action='store_true', help='also refit both five-seed learning curves')
-    parser.add_argument('--refit-306', action='store_true', help='write a train-only refit to output/model_306.npz')
-    parser.add_argument('--check', action='store_true', help='fail if local results differ from checked-in article measurements')
+    parser.add_argument('--refit', action='store_true', help='fit fixed33 on train at C=3 and write output/eurosat_33.npz')
+    parser.add_argument('--check', action='store_true', help='fail if results differ from checked-in measurements')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--output', type=Path, default=ROOT / 'output' / 'reproduce')
     args = parser.parse_args()
@@ -334,7 +344,7 @@ def main() -> None:
     }
     (args.output / 'environment.json').write_text(json.dumps(metadata, indent=2) + '\n')
     data = extract_features(args.batch_size, args.output)
-    evaluate(data, args.output, args.refit_306)
+    evaluate(data, args.output, args.refit)
     if args.fractions:
         learning_curves(data, args.output)
     if args.check:

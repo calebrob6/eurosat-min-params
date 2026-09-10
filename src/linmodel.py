@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import StandardScaler
 
 
@@ -92,25 +91,3 @@ def predict_reference_class(x: np.ndarray, w_ref: np.ndarray, b_ref: np.ndarray,
     l_rest = x[:, feature_idx] @ w_ref.T + b_ref
     logits = np.insert(l_rest, ref, 0.0, axis=1)
     return logits.argmax(1)
-
-
-def l1_rank(x: np.ndarray, y: np.ndarray, C: float = 0.05,
-            max_iter: int = 2000, random_state: int = 0) -> np.ndarray:
-    """Rank feature columns by max |coef| across classes from an L1 logreg.
-
-    Uses the ``liblinear`` L1 solver wrapped in an explicit one-vs-rest scheme,
-    which is dramatically faster than ``saga`` for this problem size and gives an
-    equivalent ranking.  (Newer scikit-learn no longer lets ``liblinear`` do
-    multiclass implicitly, so the OvR wrapper is now required.)  ``random_state``
-    is fixed so the ranking -- and hence any k-feature selection built on it -- is
-    deterministic and reproducible.
-    """
-    sc = StandardScaler().fit(x)
-    base = LogisticRegression(
-        penalty='l1', solver='liblinear', C=C, max_iter=max_iter,
-        random_state=random_state,
-    )
-    clf = OneVsRestClassifier(base).fit(sc.transform(x), y)
-    coef = np.vstack([est.coef_.ravel() for est in clf.estimators_])  # (K, F)
-    imp = np.abs(coef).max(0)
-    return np.argsort(-imp)

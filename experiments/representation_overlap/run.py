@@ -460,12 +460,12 @@ def evaluate(args) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', choices=('prepare', 'select', 'lock', 'evaluate', 'report'))
-    parser.add_argument('--cache', type=Path, default=ROOT / 'output/representation-overlap/features-v1')
+    parser.add_argument('stage', choices=('all', 'prepare', 'select', 'lock', 'evaluate', 'report'))
+    parser.add_argument('--cache', type=Path, default=ROOT / 'output/representation-features')
     parser.add_argument('--embeddings', type=Path, default=ROOT / 'output/benchmark-embeddings')
-    parser.add_argument('--metadata', type=Path, default=ROOT / 'experiments/torchgeo_bench_eurosat/reproduced')
-    parser.add_argument('--output', type=Path, default=ROOT / 'output/representation-overlap/study-v2')
-    parser.add_argument('--export', type=Path, default=ROOT / 'experiments/representation_overlap/results')
+    parser.add_argument('--metadata', type=Path, default=ROOT / 'output/backbones')
+    parser.add_argument('--output', type=Path, default=ROOT / 'output/representation-study')
+    parser.add_argument('--export', type=Path, default=ROOT / 'output/representation-results')
     parser.add_argument('--models', nargs='+', choices=MODELS, default=list(MODELS))
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--component', choices=('all', 'decoding', 'probes'), default='all')
@@ -474,7 +474,16 @@ def main() -> None:
     parser.add_argument('--batch-size', type=int, default=128)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
-    if args.stage == 'prepare':
+    if args.stage == 'all':
+        if args.pilot or args.component != 'all':
+            parser.error('the all stage requires a complete, non-pilot study')
+        data.prepare(args.cache, args.batch_size, download=args.download)
+        select(args)
+        lock_selection(args)
+        evaluate(args)
+        from .report import export
+        export(args.output, args.export)
+    elif args.stage == 'prepare':
         data.prepare(args.cache, args.batch_size, download=args.download)
     elif args.stage == 'select':
         select(args)

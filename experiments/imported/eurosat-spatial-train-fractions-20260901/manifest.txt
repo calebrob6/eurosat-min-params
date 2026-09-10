@@ -1,8 +1,0 @@
-dataset=eurosat-spatial
-bands=all (13 Sentinel-2 bands)
-eval.merge_val=false
-seed=0
-fractions=1%,2%,5%,10%,20%,50%,100%
-train_counts=162,324,810,1620,3240,8100,16200
-nested_random_subsets=true
-models=timm/resnet50,timm/convnext_tiny,torchgeo/dofa_base,torchgeo/dofa_large

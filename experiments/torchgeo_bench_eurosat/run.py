@@ -42,31 +42,20 @@ from reproduce import CHECKSUMS, DATA_ROOT, prepare_data
 
 REVISION = '9c8e4afab46675d7279c88828dfcbf0ca99b3a07'
 SOURCE = ROOT / 'output/torchgeo-bench'
-RESULTS = Path(__file__).parent / 'reproduced'
+RESULTS = ROOT / 'output/backbones'
 MODELS = {
-    'earthloc': 'torchgeo/earthloc_s2_resnet50',
-    'moco': 'torchgeo/resnet50_s2_all_moco',
-    'resnet18': 'timm/resnet18',
     'resnet50': 'timm/resnet50',
-    'vit_base': 'timm/vit/vit_base_patch16_224',
     'convnext_tiny': 'timm/convnext_tiny',
-    'dofa_base': 'torchgeo/dofa_base',
     'dofa_large': 'torchgeo/dofa_large',
     'olmoearth_nano': 'olmoearth_v1_2_nano',
-    'olmoearth_small': 'olmoearth_v1_2_small',
     'olmoearth_base': 'olmoearth_v1_2_base',
 }
-FRACTION_MODELS = (
-    'resnet50', 'convnext_tiny', 'dofa_base', 'dofa_large',
-    'olmoearth_nano', 'olmoearth_small', 'olmoearth_base',
-)
 FRACTIONS = (1, 2, 5, 10, 20, 50, 100)
 SPLITS = ('train', 'val', 'test')
 SAMPLING = 'nested_random_permutation_of_shuffled_embeddings_v1'
 DEFAULT_BATCH = {
-    'earthloc': 32, 'moco': 64, 'resnet18': 64, 'resnet50': 64,
-    'vit_base': 32, 'convnext_tiny': 64, 'dofa_base': 32, 'dofa_large': 16,
-    'olmoearth_nano': 32, 'olmoearth_small': 32, 'olmoearth_base': 32,
+    'resnet50': 64, 'convnext_tiny': 64, 'dofa_large': 16,
+    'olmoearth_nano': 32, 'olmoearth_base': 32,
 }
 logger = logging.getLogger(__name__)
 

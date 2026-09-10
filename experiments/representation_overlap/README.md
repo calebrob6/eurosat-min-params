@@ -20,29 +20,17 @@ All primary, null, band-control, class-conditioned, and named-feature results ar
 
 ## Run
 
-Use the existing pinned `output/benchmark-env` described in `../torchgeo_bench_eurosat/README.md`, from the repository root. No new pretrained extraction is needed when the authenticated `output/benchmark-embeddings/` files are present. Large caches, fitted maps, and sample predictions remain under ignored `output/`.
+Set up the CUDA environment and extract the five backbones using [the backbone runner](../torchgeo_bench_eurosat/README.md). From the repository root, the complete comparison is then:
 
 ```bash
-# Stream original TIFFs, including a separately named B10-zeroed input ablation.
-output/benchmark-env/bin/python -m experiments.representation_overlap.run prepare
-
-# A validation-only pipeline pilot; it cannot be locked or evaluated on test.
-output/benchmark-env/bin/python -m experiments.representation_overlap.run select \
-  --models olmoearth_nano --pilot --output output/representation-overlap/pilot
-
-# Full selection, without test metrics.
-output/benchmark-env/bin/python -m experiments.representation_overlap.run select
-
-# Freeze every selected configuration and artifact before test access.
-output/benchmark-env/bin/python -m experiments.representation_overlap.run lock
-output/benchmark-env/bin/python -m experiments.representation_overlap.run evaluate
-
-# Export a fresh report without replacing the checked-in study snapshot.
-output/benchmark-env/bin/python -m experiments.representation_overlap.run report \
-  --export output/representation-overlap/report
+output/benchmark-env/bin/python -m experiments.representation_overlap.run all --download
 ```
 
-`select --component decoding` and `select --component probes` can be run separately; both must finish before locking. `--output` identifies a study run, and changed code/configuration/input hashes require a new directory. Completed selection jobs can resume only under the same protocol. Export destinations also reject a different run rather than overwrite it; the command above keeps fresh reports in ignored output. A mismatched backbone checksum is an error, not a reason to silently overwrite embeddings. Alternative embedding files and their corresponding JSON metadata must be supplied together with `--embeddings` and `--metadata`.
+This recomputes handcrafted features from TIFFs, selects settings on train/validation, locks them, evaluates test, and writes tables and plots to `output/representation-results/`. Large arrays stay under ignored `output/`. It reads embeddings from `output/benchmark-embeddings/` and their matching metadata from `output/backbones/`.
+
+The stages `prepare`, `select`, `lock`, `evaluate`, and `report` are also available separately. `select --component decoding` runs just map selection, and `--component probes` runs just classifier selection. Both must finish before test evaluation. `--models olmoearth_nano --pilot` creates a validation-only pilot that cannot be evaluated on test.
+
+Use new `--cache`, `--output`, and `--export` directories for a different experiment; checked settings and hashes prevent reusing mismatched artifacts. Alternative embeddings must be paired with their own `--metadata` directory. The saved tables under `results/` remain unchanged.
 
 ## Measurement definitions
 
@@ -56,7 +44,7 @@ These decoders are fitted analysis models, not zero-parameter feature extractors
 
 The estimator is the pinned `torchgeo_bench.linear.LogisticRegression`, not a new optimizer. It uses train only, with explicit device selection and TF32 disabled. The selection and test stages are separate rather than calling the benchmark's combined `evaluate_logistic`.
 
-The v2 protocol gives every fit 8,000 iterations and restarts once with 16,000 if either the iteration or function-evaluation budget is exhausted, then fails explicitly. Tolerances remain unchanged. Returning before those budgets is recorded as such, not as proof that a gradient threshold was reached. The initial v1 run was stopped before test evaluation when one high-C shuffled control exceeded its 2,000/4,000-iteration budgets; those artifacts are preserved separately rather than relabeled.
+Each fit has an 8,000-iteration limit and restarts once with 16,000 if either its iteration or function-evaluation budget is exhausted, then fails explicitly. Returning before those limits is not itself proof that a gradient threshold was reached.
 
 Grid-boundary selections are explicit outcomes, not claims of globally optimal regularization. The secondary ImageStats decoders can approach the unregularized limit, and null decoders can prefer the strongest regularization. The classification conclusions apply to the declared C/block-weight grid.
 

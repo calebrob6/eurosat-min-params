@@ -1,9 +1,5 @@
 """CPU-only protocol tests run inside the optional benchmark environment."""
-import contextlib
-import csv
-import io
 from pathlib import Path
-import shutil
 import sys
 import tempfile
 import unittest
@@ -12,7 +8,6 @@ from unittest.mock import patch
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-import compare
 import run as benchmark_run
 from run import FRACTIONS, RecordingLoader, evaluation_jobs
 
@@ -58,7 +53,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_full_only_never_targets_curve_csv(self):
         output = Path('/tmp/results')
-        for model in compare.STEMS:
+        for model in benchmark_run.MODELS:
             for dataset in ('eurosat', 'eurosat-spatial'):
                 jobs = evaluation_jobs(model, dataset, False, output)
                 self.assertEqual(len(jobs), 1)
@@ -75,27 +70,6 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(evaluation_jobs('olmoearth_nano', 'eurosat', True, output), [
             (FRACTIONS, output, True), ((100,), output / 'scoreboard', True),
         ])
-
-    def test_comparison_uses_requested_result_directory(self):
-        original_report = (compare.FRESH / 'scoreboard_comparison.csv').read_bytes()
-        with tempfile.TemporaryDirectory() as directory:
-            destination = Path(directory)
-            shutil.copytree(compare.FRESH / 'scoreboard', destination / 'scoreboard')
-            for model in compare.CURVES:
-                for dataset in ('eurosat', 'eurosat-spatial'):
-                    name = f'{model}_{dataset}.csv'
-                    shutil.copy2(compare.FRESH / name, destination / name)
-            with patch.object(sys, 'argv', ['compare.py', '--results-dir', directory]):
-                with contextlib.redirect_stdout(io.StringIO()):
-                    compare.main()
-            with (destination / 'fraction_comparison.csv').open() as handle:
-                rows = list(csv.DictReader(handle))
-            self.assertEqual(len(rows), 98)
-            self.assertTrue(all(row['fresh_csv'].startswith(directory) for row in rows))
-            with (destination / 'scoreboard_comparison.csv').open() as handle:
-                self.assertEqual(len(list(csv.DictReader(handle))), 11)
-        self.assertEqual((compare.FRESH / 'scoreboard_comparison.csv').read_bytes(), original_report)
-
 
 if __name__ == '__main__':
     unittest.main()
