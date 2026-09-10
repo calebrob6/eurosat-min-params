@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from export_blog_results import ROOT, linear_rows, scoreboard, training_fractions, validate_backbone
+from export_blog_results import ROOT, linear_rows, representation_tables, scoreboard, training_fractions, validate_backbone
 
 
 class BlogResultsTests(unittest.TestCase):
@@ -116,9 +116,48 @@ class BlogResultsTests(unittest.TestCase):
                 [sys.executable, '-S', str(ROOT / 'export_blog_results.py'), '--output', directory],
                 cwd=directory, check=True, capture_output=True, text=True,
             )
-            for filename, count in [('scoreboard.csv', 15), ('training_fractions.csv', 126)]:
+            for filename, count in [('scoreboard.csv', 14), ('training_fractions.csv', 126),
+                                    ('combined_features.csv', 5), ('decoded_features.csv', 5),
+                                    ('explained_variance.csv', 5), ('class_centered_variance.csv', 10),
+                                    ('features_33.csv', 33), ('class_accuracy.csv', 80),
+                                    ('figure_examples.csv', 4), ('figure_gradient_medians.csv', 10),
+                                    ('supporting_results.csv', 10), ('historical_claims.csv', 7),
+                                    ('archived_resisc33.csv', 1)]:
                 with (Path(directory) / filename).open() as handle:
                     self.assertEqual(len(list(csv.DictReader(handle))), count)
+
+    def test_representation_tables_match_final_article(self):
+        tables = representation_tables()
+        decoded = {row['model']: row for row in tables['decoded_features.csv']}
+        self.assertEqual(decoded['ResNet-50']['mean_r2'], '0.757')
+        self.assertEqual(decoded['OlmoEarth v1.2 Base']['low_ndvi_anisotropy_r2'], '0.452')
+        combined = {row['model']: row for row in tables['combined_features.csv']}
+        self.assertEqual(combined['ConvNeXt-Tiny']['plus_377_accuracy_percent'], '98.17')
+        self.assertAlmostEqual(combined['DOFA Large']['plus_377_gain_points'], 0.5740740740740713)
+
+    def test_older_scoreboard_remains_exportable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run(
+                [sys.executable, '-S', str(ROOT / 'export_blog_results.py'),
+                 '--include-archive', '--output', directory],
+                cwd=directory, check=True, capture_output=True, text=True,
+            )
+            with (Path(directory) / 'scoreboard.csv').open() as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 15)
+            self.assertIn('torchgeo/earthloc_s2_resnet50', {row['model'] for row in rows})
+
+    def test_representation_table_missing_or_duplicate_row_fails(self):
+        reader = csv.DictReader
+        for duplicate in (False, True):
+            def changed(handle):
+                rows = list(reader(handle))
+                if Path(handle.name).name == 'features.csv':
+                    rows = rows + [rows[0]] if duplicate else rows[1:]
+                return rows
+            with self.subTest(duplicate=duplicate), patch('export_blog_results.csv.DictReader', side_effect=changed):
+                with self.assertRaisesRegex(ValueError, '33 unique decoded features'):
+                    representation_tables()
 
 
 if __name__ == '__main__':

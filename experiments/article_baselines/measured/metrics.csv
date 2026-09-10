@@ -1,0 +1,11 @@
+dataset,model,split,features,learned_parameters,C,n_images,correct,accuracy,article_test_accuracy_percent,provenance_status,difference_from_article_pp
+eurosat,means,val,13,126,100,5400,4115,0.7620370370370371,74.8,new_reference_missing_historical_fit_metadata,
+eurosat,means,test,13,126,100,5400,4123,0.7635185185185185,74.8,new_reference_missing_historical_fit_metadata,1.5518518518518505
+eurosat,mean_std,val,26,243,200,5400,4790,0.8870370370370371,87.8,new_reference_missing_historical_fit_metadata,
+eurosat,mean_std,test,26,243,200,5400,4820,0.8925925925925926,87.8,new_reference_missing_historical_fit_metadata,1.4592592592592695
+eurosat,imagestats,val,52,477,300,5400,4910,0.9092592592592592,90.96,historical_recipe_refit,
+eurosat,imagestats,test,52,477,300,5400,4912,0.9096296296296297,90.96,historical_recipe_refit,0.002962962962968163
+resisc45,imagestats,val,12,572,30,6300,2289,0.36333333333333334,36.63,new_reference_missing_historical_fit_metadata,
+resisc45,imagestats,test,12,572,30,6300,2305,0.36587301587301585,36.63,new_reference_missing_historical_fit_metadata,-0.042698412698420896
+resisc45,selected33,val,33,1496,30.0,6300,3860,0.6126984126984127,59.06,historical_recipe_refit,
+resisc45,selected33,test,33,1496,30.0,6300,3721,0.5906349206349206,59.06,historical_recipe_refit,0.0034920634920609928

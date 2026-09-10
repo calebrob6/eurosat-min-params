@@ -13,6 +13,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 import compare
+import run as benchmark_run
 from run import FRACTIONS, RecordingLoader, evaluation_jobs
 
 
@@ -25,6 +26,26 @@ class ToyDataset(Dataset):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_extract_only_never_fits_or_evaluates_a_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / 'data/EuroSAT'
+            data.mkdir(parents=True)
+            (root / 'data/eurosat').symlink_to('EuroSAT')
+            with (
+                patch.object(benchmark_run, 'ROOT', root),
+                patch.object(benchmark_run, 'DATA_ROOT', data),
+                patch.object(benchmark_run, 'check_source'),
+                patch.object(benchmark_run, 'prepare_data'),
+                patch.object(benchmark_run.torch.cuda, 'is_available', return_value=True),
+                patch.object(benchmark_run, 'extract', return_value=({}, {})) as extract,
+                patch.object(benchmark_run, 'evaluate') as evaluate,
+                patch.object(sys, 'argv', ['run.py', '--models', 'resnet50', '--extract-only']),
+            ):
+                benchmark_run.main()
+                extract.assert_called_once()
+                evaluate.assert_not_called()
+
     def test_source_recording_preserves_original_shuffle(self):
         torch.manual_seed(0)
         original = DataLoader(ToyDataset(), batch_size=4, shuffle=True)

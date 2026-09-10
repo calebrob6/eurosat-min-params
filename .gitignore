@@ -11,6 +11,9 @@ __pycache__/
 *.py[cod]
 .venv/
 .venv-reproduce/
+*.egg-info/
+/build/
+/dist/
 
 # Independent blog checkout and local source material (never a submodule).
 /geospatialml/

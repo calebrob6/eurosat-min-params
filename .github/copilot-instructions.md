@@ -6,7 +6,11 @@ The public default branch is EuroSAT-only. RESISC45 experiments are preserved on
 
 For the release's CPU-only reference environment use Python 3.13.13 and `python -m pip install -r requirements-reproduce.txt`. The primary reproduction command is `python reproduce.py --download --fractions --check`; it streams original TIFFs and never depends on historical image/feature caches. `--refit-306` writes a new checkpoint under `output/`, never over a checked-in model. See `REPRODUCIBILITY.md` for article coverage and historical physical-band naming caveats.
 
-Run commands from the repository root. The project is a collection of directly executable Python scripts rather than an installed package, and several scripts resolve checkpoints and result files relative to the root.
+Run research and reproduction commands from the repository root; several scripts resolve checkpoints and result files relative to the root. The reusable `eurosat_features` PyTorch package is separately installable with `python -m pip install -e ".[io]"`. It must not import the research scripts or require their caches.
+
+`EuroSATFeatures(feature_set="33"|"377"|"52")` accepts batches of original-scale, TIFF-order patches and returns float32 tensors on the input device. Keep the native PyTorch calculations separate from the NumPy/SciPy reference reproduction, and preserve feature order and historical channel choices in both. The fixed extractor has no learned parameters or image gradients; a classifier attached to it can still be trained.
+
+`python export_blog_results.py` exports the final article tables without fitting models. `python reproduce_all.py --dry-run` lists the commands for fresh local, backbone, overlap, supporting-baseline, and figure runs; CPU and CUDA environments stay separate. Never turn a historical note into an exact reproduction claim when its original fit was not saved.
 
 ```bash
 python -m venv .venv

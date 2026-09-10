@@ -1,0 +1,2 @@
+source_commit,source_artifact,pool_features,selected_features,selected_feature_indices,regularization_C,C_selection_validation_accuracy,max_C_sweep_validation_accuracy,one_standard_error_threshold,n_train,n_test,learned_parameters,test_accuracy
+68480cb7aca0e73289da2ac36ec95faeab020b2d,experiments/resisc45_33_feature_fractions.csv,147,33,26;74;20;81;83;13;8;21;25;38;0;35;2;15;112;23;47;85;33;128;45;27;98;7;14;105;107;34;76;32;129;24;31,30.0,0.612698,0.615714,0.609586,18900,6300,1496,0.590635

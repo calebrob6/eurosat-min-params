@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eurosat-features"
+version = "0.1.0"
+description = "Fixed spectral and spatial features for EuroSAT patches"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = ["torch>=2.5"]
+
+[project.optional-dependencies]
+io = ["numpy>=1.26", "rasterio>=1.3"]
+
+[project.urls]
+Repository = "https://github.com/calebrob6/eurosat-min-params"
+Article = "https://geospatialml.com/posts/eurosat-min-params/"
+
+[tool.setuptools.packages.find]
+include = ["eurosat_features*"]

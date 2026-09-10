@@ -1,16 +1,17 @@
 #!/usr/bin/env python
-"""Assemble original article tables from archived CSVs; no model fitting.
+"""Export the final article's tables from recorded results; no model fitting.
 
-Writes the 15-row scoreboard and all 126 points behind the two training-fraction
-figures. The backbone numbers come from experiments/imported, never from the
-fresh reruns. Local curves retain their five-seed standard deviations, while
-backbone curves retain their test-bootstrap confidence intervals.
+Includes the 14-row scoreboard, 126 learning-curve points, feature list, class
+scores, and the three representation-comparison tables. Original scoreboard
+measurements stay separate from the later controlled probe fits.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
+import statistics
 
 from experiments.torchgeo_bench_eurosat.compare import (
     CURVES,
@@ -40,6 +41,26 @@ BACKBONE_MODELS = {
     'OlmoEarth v1.2 Base': 'olmoearth_base',
 }
 TRAIN_COUNTS = (162, 324, 810, 1620, 3240, 8100, 16200)
+OVERLAP = ROOT / 'experiments/representation_overlap/results'
+OVERLAP_MODELS = {
+    'resnet50': 'ResNet-50',
+    'convnext_tiny': 'ConvNeXt-Tiny',
+    'dofa_large': 'DOFA Large',
+    'olmoearth_nano': 'OlmoEarth v1.2 Nano',
+    'olmoearth_base': 'OlmoEarth v1.2 Base',
+}
+
+
+def read_rows(path: Path) -> list[dict]:
+    with path.open() as handle:
+        return list(csv.DictReader(handle))
+
+
+def one_row(rows: list[dict], **conditions) -> dict:
+    found = [row for row in rows if all(row[key] == value for key, value in conditions.items())]
+    if len(found) != 1:
+        raise ValueError(f'expected one result for {conditions}, found {len(found)}')
+    return found[0]
 
 
 def validate_backbone(row: dict, dataset: str, count: int) -> None:
@@ -165,15 +186,95 @@ def training_fractions() -> list[dict]:
     return rows
 
 
+def representation_tables() -> dict[str, list[dict]]:
+    classification = read_rows(OVERLAP / 'classification.csv')
+    comparisons = read_rows(OVERLAP / 'complementarity.csv')
+    decoding = read_rows(OVERLAP / 'decoding.csv')
+    features = read_rows(OVERLAP / 'features.csv')
+    combined, explained, reverse, centered = [], [], [], []
+    for model, label in OVERLAP_MODELS.items():
+        base = one_row(classification, model=model, context='standalone')
+        accuracy = float(base['accuracy'])
+        if not math.isclose(accuracy, int(base['correct']) / 5400, abs_tol=1e-12):
+            raise ValueError(f'{model}: inconsistent backbone accuracy')
+        combined_row = {'model': label, 'embedding_accuracy_percent': f'{100 * accuracy:.2f}'}
+        explained_row = {'model': label}
+        for rep, short in (('frontier33', '33'), ('pool377', '377')):
+            clf = one_row(classification, model=model, representation=rep, context='combined', variant='original')
+            delta = one_row(comparisons, model=model, representation=rep, context='combined', variant='original')
+            if (delta['primary'] != 'True' or not math.isclose(
+                    float(clf['accuracy']) - accuracy, float(delta['accuracy_delta']), abs_tol=1e-12)):
+                raise ValueError(f'{model}/{rep}: inconsistent paired comparison')
+            if not math.isclose(float(clf['accuracy']), int(clf['correct']) / 5400, abs_tol=1e-12):
+                raise ValueError(f'{model}/{rep}: inconsistent combined accuracy')
+            combined_row.update({
+                f'plus_{short}_accuracy_percent': f'{100 * float(clf["accuracy"]):.2f}',
+                f'plus_{short}_gain_points': float(delta['accuracy_delta']) * 100,
+                f'plus_{short}_gain_ci_low': float(delta['accuracy_ci_low']) * 100,
+                f'plus_{short}_gain_ci_high': float(delta['accuracy_ci_high']) * 100,
+                f'plus_{short}_holm_pvalue': delta['mcnemar_holm_pvalue'],
+            })
+            forward = one_row(decoding, model=model, representation=rep, direction='h_to_z',
+                              context='ordinary', variant='original')
+            explained_row.update({
+                f'features_{short}_r2_percent': f'{100 * float(forward["native_r2"]):.1f}',
+                f'features_{short}_ci_low_percent': float(forward['native_ci_low']) * 100,
+                f'features_{short}_ci_high_percent': float(forward['native_ci_high']) * 100,
+            })
+            within = one_row(decoding, model=model, representation=rep, direction='h_to_z',
+                             context='within_class', variant='original')
+            centered.append({'model': label, 'features': short, 'r2_percent': float(within['native_r2']) * 100})
+        combined.append(combined_row)
+        explained.append(explained_row)
+        rows = [row for row in features if row['model'] == model
+                and row['representation'] == 'frontier33' and row['variant'] == 'original']
+        if len(rows) != 33 or len({row['feature'] for row in rows}) != 33:
+            raise ValueError(f'{model}: expected 33 unique decoded features')
+        values = {row['feature']: float(row['r2']) for row in rows}
+        if not all(math.isfinite(value) for value in values.values()):
+            raise ValueError(f'{model}: undefined decoded feature')
+        mean = statistics.mean(values.values())
+        aggregate = one_row(decoding, model=model, representation='frontier33', direction='z_to_h',
+                            context='ordinary', variant='original')
+        if not math.isclose(mean, float(aggregate['macro_r2']), abs_tol=1e-12):
+            raise ValueError(f'{model}: feature scores disagree with their mean')
+        reverse.append({
+            'model': label, 'mean_r2': f'{mean:.3f}',
+            'largest_ndvi_region_r2': f'{values["blob2lrg_ndvi"]:.3f}',
+            'low_ndvi_anisotropy_r2': f'{values["tail_aniso_low_ndvi"]:.3f}',
+        })
+    return {
+        'combined_features.csv': combined, 'explained_variance.csv': explained,
+        'decoded_features.csv': reverse, 'class_centered_variance.csv': centered,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'output/blog-results')
+    parser.add_argument('--include-archive', action='store_true', help='include EarthLoc from the earlier scoreboard')
     args = parser.parse_args()
     table, curves = scoreboard(), training_fractions()
+    if not args.include_archive:
+        table = [row for row in table if row['model'] != 'torchgeo/earthloc_s2_resnet50']
+    extra = representation_tables()
+    for output_name, source_name in (
+        ('features_33.csv', 'eurosat_306_features.csv'),
+        ('class_accuracy.csv', 'eurosat_per_class.csv'),
+        ('figure_examples.csv', 'figure_examples.csv'),
+        ('figure_gradient_medians.csv', 'figure_gradient_medians.csv'),
+    ):
+        extra[output_name] = read_rows(ROOT / 'results' / source_name)
+    baselines = ROOT / 'experiments/article_baselines'
+    extra['supporting_results.csv'] = read_rows(baselines / 'measured/metrics.csv')
+    extra['historical_claims.csv'] = read_rows(baselines / 'archive_manifest.csv')
+    extra['archived_resisc33.csv'] = read_rows(baselines / 'archived/resisc45_33_full.csv')
     args.output.mkdir(parents=True, exist_ok=True)
     write(args.output / 'scoreboard.csv', table)
     write(args.output / 'training_fractions.csv', curves)
-    print(f'Exported {len(table)} original-score rows and {len(curves)} curve points to {args.output}')
+    for name, rows in extra.items():
+        write(args.output / name, rows)
+    print(f'Exported {len(table)} scoreboard rows, {len(curves)} curve points, and {len(extra)} additional tables to {args.output}')
 
 
 if __name__ == '__main__':

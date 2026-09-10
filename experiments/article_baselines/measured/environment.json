@@ -1,0 +1,43 @@
+{
+  "result_kind": "new_raw_image_reference_runs_not_substitutes_for_missing_historical_metadata",
+  "python": "3.13.13",
+  "numpy": "2.4.4",
+  "scipy": "1.18.1",
+  "sklearn": "1.9.0",
+  "rasterio": "1.5.1",
+  "gdal": "3.12.4",
+  "threads_per_blas_library": 1,
+  "raw_image_reader_workers": 4,
+  "eurosat": {
+    "command": ".venv-reproduce/bin/python experiments/article_baselines/run.py --dataset eurosat --workers 4",
+    "output": "output/article-baselines/eurosat",
+    "elapsed_seconds": 79.551,
+    "preprocessing": "original 13-band 64x64 uint16 TIFF; float32 band-major mean/population-std/min/max",
+    "split_sha256": {
+      "train": "1c1d2e855f95deee605a3d992f914d113fddbecf422ec61648057d029a37d695",
+      "val": "b385741f31daa9f1250cf1e1fe03adfab394e1172e0693df40141af004f60330",
+      "test": "cf37948894c12bd953930ff54ee9b7abf0b31478abb8d25fd2c6c721db74c592"
+    },
+    "decoded_image_sha256": {
+      "train": "f1bb351cac9f2469ed22c9f301b3bf91a71c8adf6e4b004b6ec0e62026580a9f",
+      "val": "22863517f8e1dd4cdc79f24be6b67d259a0a981ac016c9675f0bd5ed0335b42b",
+      "test": "6d95e6cafe3e42da149f830ece669fa9b7fa6dda1576a1abfbecab8f960c8704"
+    }
+  },
+  "resisc45": {
+    "command": ".venv-reproduce/bin/python experiments/article_baselines/run.py --dataset resisc45 --workers 4",
+    "output": "output/article-baselines/resisc45",
+    "elapsed_seconds": 169.41,
+    "preprocessing": "rasterio/GDAL bilinear JPEG read to 3x64x64 uint8 before float32 RGB features",
+    "split_sha256": {
+      "train": "ecfa963be4d85eac83665f8be8634abcb4fe6f3546472cc0e87999e2cab4449b",
+      "val": "08d81f642526bec240589000af7f49a47e8d071a6e7925b0f36246a78ab64342",
+      "test": "e0927e80130b47317a2f18520d98382b6fc56f0d3edd3345140f7d02267c3805"
+    },
+    "decoded_image_sha256": {
+      "train": "c470d5008786294de55056f88d97c52e71557cdb47da28223ffa522ab789c113",
+      "val": "f7751147f06a58e35676be1e349f40e89dbce779dc605a0c5465096003ad9a72",
+      "test": "74cf5a3875b3659cd8f49bd686f36ec9041029ac4dee2b0ebfe8e84b52441bb4"
+    }
+  }
+}

@@ -309,6 +309,7 @@ def main() -> None:
     parser.add_argument('--cache', type=Path, default=ROOT / 'output/benchmark-embeddings')
     parser.add_argument('--output', type=Path, default=RESULTS)
     parser.add_argument('--fresh', action='store_true', help='recompute embeddings instead of reading verified cache')
+    parser.add_argument('--extract-only', action='store_true', help='write embeddings and metadata without fitting or scoring classifiers')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     if args.batch_size is not None and args.batch_size < 1:
@@ -329,11 +330,12 @@ def main() -> None:
             data, metadata = extract(model_key, dataset, args.device, args.workers,
                                      args.batch_size or DEFAULT_BATCH[model_key],
                                      args.output, args.cache, args.fresh)
-            for fractions, destination, nested in evaluation_jobs(
-                model_key, dataset, args.fractions, args.output
-            ):
-                evaluate(model_key, dataset, data, metadata, fractions,
-                         args.device, destination, nested=nested)
+            if not args.extract_only:
+                for fractions, destination, nested in evaluation_jobs(
+                    model_key, dataset, args.fractions, args.output
+                ):
+                    evaluate(model_key, dataset, data, metadata, fractions,
+                             args.device, destination, nested=nested)
 
 
 if __name__ == '__main__':

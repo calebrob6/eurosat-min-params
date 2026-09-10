@@ -1,58 +1,88 @@
-# Solving EuroSAT with as few parameters as possible
+# EuroSAT with 306 parameters
 
-**The game: classify EuroSAT as accurately as possible with as few learned parameters as possible.** Instead of starting with a pretrained backbone, we ask how far fixed image measurements and a tiny classifier can go.
+**[Features](#use-the-features) | [Reproduce the results](#reproduce-the-results) | [Files](#files) | [License](#license)**
 
-Our best handcrafted-feature model reaches **96.04% test accuracy with 306 learned weights and biases**. It computes 33 spectral and spatial measurements per image, then applies a single affine classifier. These are the original article results, not replacements with the slightly different numbers from later reruns.
+Code for [Solving EuroSAT with as Few Parameters as Possible](https://geospatialml.com/posts/eurosat-min-params/). We compute fixed spectral and spatial measurements from each satellite image, then fit a linear classifier. The 33-feature model reaches **96.04% test accuracy with 306 learned weights and biases** on EuroSAT.
 
-## Rules of the game
+This repository contains the feature extractors, saved models, experiment scripts, and results. The features are also available as a PyTorch module that runs on CPU or CUDA.
 
-1. **Use the same board.** EuroSAT has 27,000 Sentinel-2 patches, each 64x64 pixels with 13 bands and one of 10 labels. Use TorchGeo's fixed 16,200 training, 5,400 validation, and 5,400 test images.
-2. **Count every learned weight and bias used for prediction.** A pretrained backbone's weights still count, even when frozen. Count its classifier too.
-3. **Fixed arithmetic is allowed.** Means, percentiles, gradients, spectral ratios, line/corner statistics, and other deterministic image measurements have no learned weights. Feature engineering and subset selection do not count as deployed scalar parameters under this game's rules, but they are still part of the research effort.
-4. **Select without test labels.** Fit weights on train; choose features and regularization with train-only cross-validation and/or validation. Do not merge validation into the final training set or use test accuracy to choose a configuration.
-5. **Report the accuracy/parameter tradeoff.** We reduced the count needed to exceed 94%, then 95%, then 96%. These are the best models found by our search, not proofs of a global minimum.
+## Install
 
-The parameter-saving trick is simple: subtract one class's affine score from every class score, leaving one implicit zero-score reference class. A 10-class model with F features then stores `9 * (F + 1)` values instead of `10 * (F + 1)`, without changing the mathematical classifier. We also fold the training-set feature standardizer into the weights and bias, so it adds no deployed values.
+```bash
+git clone https://github.com/calebrob6/eurosat-min-params.git
+cd eurosat-min-params
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[io]"
+```
 
-| Model | Fixed features | Learned values | Validation | Test |
-|---|---:|---:|---:|---:|
-| ImageStats (per-band mean/std/min/max) | 52 | 477 | 90.93% | 90.96% |
-| Reference-class linear, submission 12 | 18 | 171 | 94.06% | 94.33% |
-| Reference-class linear, submission 13 | 30 | 279 | 95.31% | 95.37% |
-| **Reference-class linear, submission 14** | **33** | **306** | **96.17%** | **96.04%** |
+The feature module only needs PyTorch. The `io` extra adds NumPy and rasterio for reading TIFFs and saving feature files.
 
-The 33 measurements combine spectral distributions, multiscale gradient texture, orientation entropy, spectral-index texture, Hough lines, Harris corners, local binary patterns, connected components, and low-NDVI region shape. The exact ordered recipe is in [`src/frontier.py`](src/frontier.py) and [`results/eurosat_306_features.csv`](results/eurosat_306_features.csv).
+## Use the features
 
-## Original results versus fresh reruns
+```python
+import torch
+from eurosat_features import EuroSATFeatures
 
-**The uploaded CSVs contain the original blog numbers and are preserved on `main`.** For example, they report DOFA Large at **98.33%**, and OlmoEarth v1.2 Nano/Small/Base at **96.89% / 98.65% / 98.80%**. They have not been overwritten with the fresh reproduction scores.
+extractor = EuroSATFeatures(feature_set="33")
 
-| Evidence | Location |
-|---|---|
-| Original full-data backbone scoreboard | [`experiments/imported/eurosat-13band-merge-val-false-20260901/`](experiments/imported/eurosat-13band-merge-val-false-20260901/) |
-| Original ResNet/ConvNeXt/DOFA training-fraction curves | [`experiments/imported/eurosat-train-fractions-20260901/`](experiments/imported/eurosat-train-fractions-20260901/) and [`eurosat-spatial-train-fractions-20260901/`](experiments/imported/eurosat-spatial-train-fractions-20260901/) |
-| Original OlmoEarth curves and v1.2 full-data scores | [`experiments/imported/olmoearth-train-fractions-20260901/`](experiments/imported/olmoearth-train-fractions-20260901/) |
-| Local handcrafted/ImageStats headline results | [`results/eurosat_models.csv`](results/eurosat_models.csv) |
-| Original local five-seed curves | [`experiments/eval_training_fractions_result.csv`](experiments/eval_training_fractions_result.csv) and [`eval_imagestats_fractions_result.csv`](experiments/eval_imagestats_fractions_result.csv) |
-| Fresh backbone runs and original-vs-fresh comparisons | [`experiments/torchgeo_bench_eurosat/reproduced/`](experiments/torchgeo_bench_eurosat/reproduced/) |
+# A batch of eight 13-band, 64x64 patches in the original pixel-value scale.
+images = torch.rand(8, 13, 64, 64) * 10000
+features = extractor(images)  # (8, 33)
 
-## Reproduce the blog results
+print(extractor.feature_names)
+```
 
-Run all commands from the repository root. None requires the separately maintained blog checkout.
+Use `feature_set="377"` for the full pool or `"52"` for per-band mean, standard deviation, minimum, and maximum. To run on a GPU, move both the module and images to CUDA:
 
-### Assemble the original tables and curve data
+```python
+features = extractor.to("cuda")(images.to("cuda"))
+```
 
-This uses only Python's standard library and the checked-in CSVs. It reads the original measurements; it does **not** train or evaluate a model.
+The input band order is the physical order in TorchGeo's EuroSAT TIFFs:
+
+```text
+B01 B02 B03 B04 B05 B06 B07 B08 B09 B10 B11 B12 B8A
+```
+
+Keep the original pixel values if you want to use the saved classifiers; do not normalize images to match an ImageNet model. The extractor returns one float32 vector per patch on the input device. It has no learned weights. You can train a head on these features, but the fixed extractor does not provide gradients with respect to the image.
+
+Floating-point results can differ slightly between NumPy, CPU PyTorch, and CUDA. The reproduction commands below retain the original NumPy implementation for the paper's reference results.
+
+```python
+model = torch.nn.Sequential(
+    EuroSATFeatures(feature_set="33"),
+    torch.nn.Linear(33, 10),
+)
+logits = model(images)
+```
+
+This example has a new 10-row classifier. The published 306-value model stores only nine rows, with one class's score fixed at zero.
+
+The 33-feature model uses 32 columns from the full pool plus one additional region-shape measurement. It is not simply a 33-column slice of the 377 features. The code keeps the article's numerical band choices; some older index names differ from their usual physical definitions. See [the band notes](REPRODUCIBILITY.md#band-order-and-feature-names).
+
+### Extract features from TIFF files
+
+```bash
+python extract_features.py path/to/patches/ \
+  --features 33 --device cuda:0 --output output/features.npz
+```
+
+Directories are searched recursively. Each TIFF must have 13 bands and 64x64 pixels. The output contains `features`, `filenames`, and `feature_names`. Existing files are not overwritten.
+
+## Reproduce the results
+
+Run these commands from the repository root. You do not need the separate blog checkout.
+
+To export the article's tables from the saved results, without fitting any models:
 
 ```bash
 python export_blog_results.py
 ```
 
-It writes `output/blog-results/scoreboard.csv` (all 15 scoreboard rows) and `output/blog-results/training_fractions.csv` (all 126 points for nine methods, seven fractions, and two split protocols). Every row names its source CSV. The script requires the scoreboard accuracies to match the original article's rounded values. Local five-seed standard deviations and backbone bootstrap confidence intervals have separate fields so they are not confused.
+The tables go to `output/blog-results/`: the 14-model comparison, learning curves, feature list, class accuracies, combined classifiers, and both directions of the embedding comparison.
 
-### Rerun the local handcrafted models and ImageStats
-
-The reference environment is **Python 3.13.13 on Linux, CPU only**. No GPU, TorchGeo installation, pretrained weights, or pre-existing NumPy caches are needed.
+To recompute the local EuroSAT results from the original TIFFs, use the separate CPU reference environment:
 
 ```bash
 python3.13 -m venv .venv-reproduce
@@ -61,58 +91,33 @@ python -m pip install -r requirements-reproduce.txt
 python reproduce.py --download --fractions --check
 ```
 
-This downloads the checksum-pinned EuroSAT archive and random/spatial split files as needed, streams the original TIFFs, recomputes the features, evaluates the checked-in 171/279/306-value heads, fits ImageStats with validation-selected C, and refits both five-seed learning curves. `--check` fails if the headline counts, per-class scores, feature schema, ImageStats C sweep, or requested learning curves differ from the reference results.
+This evaluates the saved 171-, 279-, and 306-value models, refits ImageStats, and reruns the random and spatial learning curves. Add `--refit-306` to fit a new copy of the published 33-feature classifier. New results go under `output/`; the saved models stay unchanged.
 
-For only the model table, omit `--fractions`. To also refit the frozen 33-feature model on train with C=3 instead of loading its checkpoint:
-
-```bash
-python reproduce.py --download --refit-306 --fractions --check --output output/refit
-```
-
-This writes `output/refit/model_306.npz`; it never overwrites the checked-in checkpoint or reruns the adaptive feature search. All downloaded data and generated results stay under ignored `data/` and `output/`.
-
-### Rerun the frozen-backbone comparisons
-
-This is a separate, pinned **CUDA GPU** environment. The 11 backbone scoreboard rows and 98 backbone learning-curve points use TorchGeo-bench's own model wrappers, feature extraction, and logistic-regression probe. Model weights remain frozen and every probe uses `merge_val=false`.
+The pretrained backbones and embedding comparisons use a separate CUDA environment. After following the [environment setup](REPRODUCIBILITY.md#cuda-environment), run:
 
 ```bash
-git clone https://github.com/torchgeo/torchgeo-bench.git output/torchgeo-bench
-git -C output/torchgeo-bench checkout 9c8e4afab46675d7279c88828dfcbf0ca99b3a07
-python3.13 -m venv output/benchmark-env
-output/benchmark-env/bin/python -m pip install \
-  -r experiments/torchgeo_bench_eurosat/requirements.txt \
-  -c experiments/torchgeo_bench_eurosat/reproduced/environment-freeze.txt
-
-output/benchmark-env/bin/python experiments/torchgeo_bench_eurosat/run.py --download \
-  --models earthloc moco resnet18 vit_base \
-  --output output/blog-backbones
-
-output/benchmark-env/bin/python experiments/torchgeo_bench_eurosat/run.py --download \
-  --models resnet50 convnext_tiny dofa_base dofa_large olmoearth_nano olmoearth_small olmoearth_base \
-  --datasets eurosat eurosat-spatial --fractions \
-  --output output/blog-backbones
-
-python experiments/torchgeo_bench_eurosat/compare.py --results-dir output/blog-backbones
+python reproduce_all.py --download
 ```
 
-The output includes fresh model/curve CSVs, resolved model configurations, weight and embedding hashes, and original-vs-fresh comparison CSVs. These commands leave the original uploads and checked-in reruns unchanged. See [the benchmark guide](experiments/torchgeo_bench_eurosat/README.md) for embedding reuse, batch sizes, and source revisions.
+This runs the local models, backbone comparisons, representation comparisons, supporting baselines, and figure statistics. `--dry-run` prints the commands. `--steps overlap` runs just the representation comparisons, extracting the required embeddings first. Add `--exploratory` for the longer CNN and MOSAIKS runs. Results go to `output/reproduce-all/`, with original-versus-fresh comparisons kept alongside them.
 
-The independent backbone reruns reproduce the scores closely, not universally bit-for-bit: full-data differences are at most six test images (0.11 percentage points), and the maximum learning-curve difference is 0.44 points. The archived original values remain the source for the blog tables.
+The [reproduction guide](REPRODUCIBILITY.md) lists what each command covers, including the RESISC45 comparison. The original backbone scores can differ slightly on a fresh run. The old means-only, mean-plus-std, and RESISC45 ImageStats numbers lack saved fitting settings. Their new runs are labelled separately, not substituted for the article's numbers. The optional CNN and MOSAIKS reruns are described in the [supporting-baseline guide](experiments/article_baselines/README.md).
 
-## Interpretation and scope
+## Files
 
-This is a parameter-count game, not a claim that feature engineering, extraction compute, or choosing a feature subset is free in practice. Pretrained models can transfer to many tasks without this dataset-specific search.
+| Path | Contents |
+|---|---|
+| `eurosat_features/` | PyTorch feature extractors |
+| `src/` | Original NumPy features, data loading, and small classifiers |
+| `submissions/` | Saved models and their training/evaluation scripts |
+| `results/` | Published local results and feature names |
+| `experiments/torchgeo_bench_eurosat/` | Frozen-backbone reproduction |
+| `experiments/representation_overlap/` | Combined classifiers, embedding comparisons, and saved results |
+| `experiments/article_baselines/` | Supporting baselines and historical-result sources |
+| `ideas/` | Notes from the feature search |
 
-The local learning curves use five stratified training subsamples; the original backbone curves use one nested unstratified sample sequence per model. Spatial experiments are post-hoc repartitions of the same image universe used during feature selection, not untouched geographic model-selection benchmarks. The 74.8% means-only and 87.8% means-plus-std ablations remain historical notes, not exact reproduction targets.
-
-The release preserves the original numerical feature arithmetic. Some historical physical-band aliases and percentile descriptions in the article need correction; changing their numeric indices would change the trained model. See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for the complete caveats and [RESULTS.md](RESULTS.md) for the local experiment summary.
-
-## Research archive
-
-`experiments/`, `ideas/`, and older submissions retain the EuroSAT search history. Some historical scripts require derived caches; the commands above are the supported reproduction paths. `BLOG.md`, `RESULTS.html`, and `FEATURES.html` are historical drafts and illustrations.
-
-RESISC45 research is preserved on the [`resisc45` branch](https://github.com/calebrob6/eurosat-min-params/tree/resisc45), separate from the EuroSAT-focused `main` tree. The independently cloned `geospatialml/` blog checkout is ignored and is **not a submodule**.
+The full RESISC45 research history remains on the [`resisc45` branch](https://github.com/calebrob6/eurosat-min-params/tree/resisc45). Downloaded data, extracted embeddings, and new experiment outputs are ignored by Git.
 
 ## License
 
-Code is provided under the [MIT license](LICENSE). EuroSAT images and externally downloaded model weights retain their respective owners' licenses; they are not included or relicensed here.
+[MIT](LICENSE) for the code. EuroSAT, RESISC45, and downloaded model weights retain their own licenses.
