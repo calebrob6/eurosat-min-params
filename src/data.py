@@ -40,7 +40,7 @@ TIFF_BAND_NAMES = [
     'B08', 'B09', 'B10', 'B11', 'B12', 'B8A',
 ]
 BAND_NAMES = TIFF_BAND_NAMES
-# Legacy SWIR aliases index B12 and B8A, respectively. See REPRODUCIBILITY.md.
+# Legacy SWIR aliases index B12 and B8A, respectively.
 B_BLUE, B_GREEN, B_RED, B_NIR, B_SWIR1, B_SWIR2 = 1, 2, 3, 7, 11, 12
 
 DATA_ROOT = os.path.join(os.path.dirname(__file__), '..', 'data', 'EuroSAT')

@@ -1,7 +1,0 @@
-# CPU-only environment used to reproduce the article's local models and curves.
-# Python 3.13.13; install separately from the optional TorchGeo neural stack.
-numpy==2.4.4
-scipy==1.18.1
-scikit-learn==1.9.0
-rasterio==1.5.1
-matplotlib==3.10.7

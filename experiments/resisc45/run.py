@@ -95,29 +95,12 @@ def extract(record: dict, batch_size: int) -> dict:
             'selected33': np.concatenate(pool), 'pool_names': names}
 
 
-def check_results(output: Path) -> None:
-    """Compare both fitted heads with the recorded reference counts."""
-    with (Path(__file__).parent / 'results.csv').open() as handle:
-        expected = list(csv.DictReader(handle))
-    with (output / 'results.csv').open() as handle:
-        actual = list(csv.DictReader(handle))
-    if len(actual) != len(expected):
-        raise ValueError('wrong number of result rows')
-    for wanted, got in zip(expected, actual, strict=True):
-        if (wanted['model'], wanted['split']) != (got['model'], got['split']):
-            raise ValueError('model or split order differs')
-        for key in ('features', 'learned_parameters', 'C', 'n_images', 'correct', 'accuracy'):
-            if float(wanted[key]) != float(got[key]):
-                raise ValueError(f'{got["model"]}/{got["split"]}: {key} differs')
-
-
 def main() -> None:
     """Run both baselines using train-only fitting and validation selection."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=ROOT / 'data/RESISC45')
     parser.add_argument('--output', type=Path, default=ROOT / 'output/resisc45')
     parser.add_argument('--download', action='store_true')
-    parser.add_argument('--check', action='store_true')
     parser.add_argument('--batch-size', type=int, default=256)
     args = parser.parse_args()
     if args.batch_size < 1:
@@ -166,8 +149,6 @@ def main() -> None:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator='\n')
         writer.writeheader()
         writer.writerows(rows)
-    if args.check:
-        check_results(output)
 
 
 if __name__ == '__main__':

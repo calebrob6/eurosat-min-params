@@ -2,7 +2,10 @@
 
 Code for [Solving EuroSAT with as Few Parameters as Possible](https://geospatialml.com/posts/eurosat-min-params/). We measure spectral and spatial properties of each image, then fit a linear classifier. The final model uses **33 fixed features and 306 learned values**, reaching **96.04% test accuracy** on EuroSAT.
 
-The repo keeps the final model, an ImageStats baseline, and the feature/embedding comparison—not the steps of the original search.
+| Features | Learned values | Validation | Test |
+|---|---:|---:|---:|
+| ImageStats (52) | 477 | 90.93% | 90.96% |
+| Final fixed features (33) | 306 | 96.17% | 96.04% |
 
 ## Install
 
@@ -13,10 +16,10 @@ git clone https://github.com/calebrob6/eurosat-min-params.git
 cd eurosat-min-params
 uv venv --python 3.13 .venv
 source .venv/bin/activate
-uv pip install --torch-backend auto -e ".[io]"
+uv pip install --torch-backend auto -e ".[experiments]"
 ```
 
-Use `--torch-backend cpu` for a CPU-only install. The module itself only needs PyTorch; `io` adds TIFF reading.
+Use `--torch-backend cpu` for a CPU-only install. The feature module itself only needs PyTorch; `experiments` adds the NumPy stack that the scripts below use.
 
 ## Use the features
 
@@ -34,7 +37,7 @@ logits = model(images)
 
 Move the module and input to CUDA to use a GPU. Outputs are float32 tensors on the input device. The extractor has no learned weights or image gradients; the classifier can be trained normally.
 
-`"377"` preserves the historical feature pool. `"389"` is the extended optimization pool used by the full-pool importance experiment: the same 377 columns followed by all 12 low/high pan, NDVI, and NDBI region-shape measurements. `"52"` selects ImageStats.
+`"377"` is the historical feature pool and `"389"` adds all 12 region-shape measurements. `"52"` selects ImageStats.
 
 Inputs must be 13-band 64x64 patches at the original pixel scale. The order matches `torchgeo.datasets.EuroSAT.all_band_names` and an untransformed dataset with default `bands`:
 
@@ -42,9 +45,9 @@ Inputs must be 13-band 64x64 patches at the original pixel scale. The order matc
 B01 B02 B03 B04 B05 B06 B07 B08 B09 B10 B11 B12 B8A
 ```
 
-TorchGeo returns those TIFF channels unchanged as float32. Explicit band selection or image transforms can change the order or values. PyTorch uses its own numerical operations; it does not emulate NumPy rounding. See [the reference notes](REPRODUCIBILITY.md) before using a saved NumPy-trained head.
+A few feature names keep older band aliases: `nbr`, for example, uses B08 and B8A rather than the usual burn-ratio bands. The PyTorch module and the NumPy reference in `src/` share those choices, but PyTorch uses its own numerical operations, so binning and threshold results can differ near boundaries.
 
-To extract files:
+To extract features from a directory of patches:
 
 ```bash
 python extract_features.py path/to/patches/ --features 389 --output output/features.npz
@@ -52,47 +55,34 @@ python extract_features.py path/to/patches/ --features 389 --output output/featu
 
 The file contains `features`, `filenames`, and `feature_names`. Add `--device cuda:0` for GPU extraction.
 
-## Run the experiment
-
-The reference classifier uses the original NumPy features:
+## Compute the results
 
 ```bash
-uv venv --python 3.13 .venv-reproduce
-uv pip install --python .venv-reproduce/bin/python -r requirements-reproduce.txt
-.venv-reproduce/bin/python reproduce.py --download --check
+python reproduce.py --download
 ```
 
-This evaluates `models/eurosat_33.npz` and fits ImageStats. Add `--refit` to train the 33-feature classifier again or `--fractions` for the learning curves. New files go under `output/`, not over the saved model.
-
-The basic RGB comparison is also on `main`:
+This downloads the original TIFFs, recomputes the features, evaluates `models/eurosat_33.npz`, fits ImageStats with validation-selected regularization, and writes tables to `output/reproduce/`. Add `--refit` to fit the 33-feature classifier again or `--fractions` for the learning curves. New files go under `output/`, never over the saved model.
 
 ```bash
-.venv-reproduce/bin/python -m experiments.resisc45.run --download --check
+python export_blog_results.py
 ```
 
-That runs ImageStats and the fixed 33-feature RESISC45 model. For pretrained embeddings and combined classifiers, follow [the embedding comparison](experiments/representation_overlap/README.md). `python export_blog_results.py` exports the saved current-model tables without training.
+That writes the article's tables from the saved results without fitting anything.
 
-To rank all 389 EuroSAT features—including every spectral-tail region-shape measurement—and trace regularized logistic-regression accuracy while recursively removing the five least-important features, run `.venv-reproduce/bin/python -m experiments.feature_importance.run --download`. See the [full-pool feature-importance experiment](experiments/feature_importance/README.md) for its protocol and outputs.
+Scores from the saved model are exact; baselines that are fitted fresh can move by a fraction of a point across NumPy and scikit-learn versions.
 
-## Files
+## Repository layout
 
 | Path | Purpose |
 |---|---|
-| `eurosat_features/` | PyTorch module |
-| `models/` | Final EuroSAT classifier |
+| `eurosat_features/` | PyTorch feature module |
 | `src/` | NumPy reference features and linear classifier |
-| `results/` | Local-model results and learning curves |
-| `experiments/` | RESISC45 and embedding comparisons |
-
-## Development
-
-```bash
-uv pip install --torch-backend auto -e ".[io,style]"
-ruff check
-ruff format --check
-```
-
-Ruff uses TorchGeo-style formatting and Google-style pydocstyle checks for the feature package and its CLI. There is no CI workflow.
+| `models/` | Final EuroSAT classifier |
+| `results/` | Model scores, feature order, and learning curves |
+| `experiments/feature_importance/` | [Rank all 389 features and prune the weakest](experiments/feature_importance/README.md) |
+| `experiments/resisc45/` | [RGB baselines on RESISC45](experiments/resisc45/README.md) |
+| `experiments/torchgeo_bench_eurosat/` | [Frozen pretrained backbone embeddings](experiments/torchgeo_bench_eurosat/README.md) |
+| `experiments/representation_overlap/` | [Handcrafted features against those embeddings](experiments/representation_overlap/README.md) |
 
 ## License
 

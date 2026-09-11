@@ -1,7 +1,8 @@
 """Frozen EuroSAT feature recipe for the published 306-value head.
 
-The historical numeric channel choices are intentional. See REPRODUCIBILITY.md
-before changing them: some spectral-index aliases do not match physical bands.
+The historical numeric channel choices are intentional: some spectral-index
+aliases do not match physical bands, and changing them invalidates the
+checked-in classifier.
 """
 from __future__ import annotations
 

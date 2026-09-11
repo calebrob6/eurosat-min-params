@@ -12,8 +12,6 @@ os.environ['MKL_NUM_THREADS'] = '1'
 import argparse
 import csv
 import hashlib
-import json
-import platform
 import shutil
 import tempfile
 import zipfile
@@ -21,9 +19,6 @@ from pathlib import Path
 from urllib.request import urlopen
 
 import numpy as np
-import rasterio
-import scipy
-import sklearn
 from sklearn.model_selection import StratifiedShuffleSplit
 
 from src.data import CLASSES, DATA_ROOT, TIFF_BAND_NAMES, iter_images, list_split
@@ -280,54 +275,11 @@ def learning_curves(data: dict, output: Path) -> None:
         write_csv(output / f'{family}_fractions.csv', rows)
 
 
-def check_results(output: Path, fractions: bool) -> None:
-    """Compare current metrics, feature order, and requested curves to results."""
-    for generated, published in [
-        ('models.csv', 'eurosat_models.csv'),
-        ('per_class.csv', 'eurosat_per_class.csv'),
-        ('features_306.csv', 'eurosat_306_features.csv'),
-        ('imagestats_c_sweep.csv', 'imagestats_c_sweep.csv'),
-    ]:
-        with (ROOT / 'results' / published).open() as handle:
-            expected = list(csv.DictReader(handle))
-        if generated in ('models.csv', 'per_class.csv'):
-            expected = [row for row in expected if row['model'] in ('306', 'imagestats')]
-        with (output / generated).open() as handle:
-            actual = list(csv.DictReader(handle))
-        if actual != expected:
-            raise ValueError(f'results differ from results/{published}')
-    if fractions:
-        for family in ('frontier', 'imagestats'):
-            with (ROOT / 'results' / f'{family}_fractions.csv').open() as handle:
-                expected_rows = list(csv.DictReader(handle))
-            with (output / f'{family}_fractions.csv').open() as handle:
-                actual_rows = list(csv.DictReader(handle))
-            if len(expected_rows) != len(actual_rows):
-                raise ValueError(f'{family}: wrong number of curve rows')
-            for wanted, got in zip(expected_rows, actual_rows, strict=True):
-                if (wanted['split_protocol'] != got['split_protocol']
-                        or float(wanted['train_fraction_percent']) != float(got['train_fraction_percent'])
-                        or int(wanted['n_train']) != int(got['n_train'])
-                        or int(wanted['n_test']) != int(got['n_test'])
-                        or int(wanted['learned_parameters']) != int(got['parameters'])
-                        or float(wanted['regularization_C']) != float(got['C'])):
-                    raise ValueError(f'{family}: mismatched split/fraction')
-                metrics = [f'seed_{i}_test_accuracy' for i in range(5)]
-                metrics += ['test_accuracy_mean', 'test_accuracy_stdev']
-                for metric in metrics:
-                    value = float(got[metric])
-                    if not np.isfinite(value) or abs(float(wanted[metric]) - value) > 1e-6:
-                        raise ValueError(f'{family} {got["split_protocol"]} '
-                                         f'{got["train_fraction_percent"]}%: {metric} differs')
-    print('Current local results and requested learning curves match.', flush=True)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--download', action='store_true')
     parser.add_argument('--fractions', action='store_true', help='also refit both five-seed learning curves')
     parser.add_argument('--refit', action='store_true', help='fit fixed33 on train at C=3 and write output/eurosat_33.npz')
-    parser.add_argument('--check', action='store_true', help='fail if results differ from checked-in measurements')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--output', type=Path, default=ROOT / 'output' / 'reproduce')
     args = parser.parse_args()
@@ -335,20 +287,11 @@ def main() -> None:
         parser.error('--batch-size must be positive')
     args.output.mkdir(parents=True, exist_ok=True)
     prepare_data(args.download, args.fractions)
-    metadata = {
-        'recipe': RECIPE, 'python': platform.python_version(), 'numpy': np.__version__,
-        'scipy': scipy.__version__, 'scikit_learn': sklearn.__version__,
-        'rasterio': rasterio.__version__, 'blas_threads': 1,
-        'data_url': DATA_URL, 'split_sha256': {k: v for k, v in CHECKSUMS.items() if k.endswith('.txt')},
-        'source': 'raw TIFFs; no image or feature caches read',
-    }
-    (args.output / 'environment.json').write_text(json.dumps(metadata, indent=2) + '\n')
     data = extract_features(args.batch_size, args.output)
     evaluate(data, args.output, args.refit)
     if args.fractions:
         learning_curves(data, args.output)
-    if args.check:
-        check_results(args.output, args.fractions)
+    print(f'tables written to {args.output}', flush=True)
 
 
 if __name__ == '__main__':

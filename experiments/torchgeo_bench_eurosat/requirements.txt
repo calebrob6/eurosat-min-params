@@ -1,4 +1,4 @@
-# Python 3.13; isolate from the CPU-only handcrafted reproduction environment.
+# Python 3.13; separate from the CPU-only feature environment.
 # Install the two CUDA wheels separately before these requirements (README.md).
 torch==2.11.0+cu128
 torchvision==0.26.0+cu128

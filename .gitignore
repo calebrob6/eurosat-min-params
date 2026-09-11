@@ -10,21 +10,11 @@ lightning_logs/
 __pycache__/
 *.py[cod]
 .venv/
-.venv-reproduce/
 *.egg-info/
 /build/
 /dist/
 
-# Independent blog checkout and local source material (never a submodule).
-/geospatialml/
-/blog_post.txt
-
-# Local runtime diagnostics may contain environment and credential data.
-/report.*.json
-/.gnhf/
+# Local blog sources and environment files.
+/blog_post/
 /.env
 /.env.*
-
-# Preserve imported result CSVs/manifests; local logs and lock files stay local.
-/experiments/imported/**/*.log
-/experiments/imported/**/*.lock

@@ -14,10 +14,10 @@ Coefficient magnitude is a model-specific conditional importance, not a causal o
 
 ## Run
 
-Install the reproducibility environment described in the root README, including the plotting dependency in `requirements-reproduce.txt`, then run from the repository root:
+Install the environment described in the root README, then run from the repository root:
 
 ```bash
-.venv-reproduce/bin/python -m experiments.feature_importance.run --download
+python -m experiments.feature_importance.run --download
 ```
 
 Feature extraction is cached under `output/feature-importance-cache-v2/`; subsequent runs authenticate and reuse it. Results go to `output/feature-importance/`. Both paths must remain under `output/`, and a nonempty results directory is never overwritten.
