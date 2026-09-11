@@ -24,6 +24,8 @@ Feature extraction is cached under `output/feature-importance-cache-v2/`; subseq
 
 The completed reference run is checked in under [`results/`](results/), including the full importance table and both plots.
 
+The one-feature-at-a-time follow-up is checked in separately under [`results_step1/`](results_step1/). It evaluates every retained-feature count, including a direct comparison between the recursive and published 33-feature sets.
+
 ## Outputs
 
 | File | Contents |
