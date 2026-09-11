@@ -35,7 +35,7 @@ The completed reference run is checked in under [`results/`](results/), includin
 | `frontier33.csv` | Separately tuned train, validation, and test score for the exact published 33-feature set |
 | `frontier33_c_sweep.csv` | Validation sweep used to tune the published 33-feature set |
 | `frontier33_features.csv` | Mapping from the published feature order into the 389-column pool |
-| `score_by_features.png` | Requested regularized logistic-regression accuracy curve |
+| `score_by_features.png` | Test accuracy by retained-feature count with the exact 33-feature set starred |
 | `top_feature_importances.png` | The 30 strongest full-model coefficient norms |
 | `summary.json` | Regularization protocol and full, best-validation, and final curve points |
 | `provenance.json` | Feature schema, source hashes, split hashes, package versions, and protocol settings |

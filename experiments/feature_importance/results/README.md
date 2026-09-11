@@ -17,6 +17,6 @@ The five strongest full-model standardized coefficient norms are `corn2frac_ndvi
 
 These are conditional coefficient importances under correlated inputs. The test curve is reported for the prespecified elimination path but was not used to select `C`, feature removals, or the reported validation points.
 
-![Regularized logistic-regression score by retained feature count](score_by_features.png)
+![Test accuracy by retained feature count with the exact 33-feature set starred](score_by_features.png)
 
 ![Top 30 full-pool feature importances](top_feature_importances.png)

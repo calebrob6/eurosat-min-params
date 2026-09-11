@@ -508,31 +508,13 @@ def plot_scores(path: Path, rows: list[dict], frontier33: dict | None = None) ->
     figure, axis = plt.subplots(figsize=(8, 5))
     axis.plot(
         counts,
-        [100 * row['validation_accuracy'] for row in ordered],
-        marker='o',
-        markersize=2.5,
-        linewidth=1.4,
-        label='validation',
-    )
-    axis.plot(
-        counts,
         [100 * row['test_accuracy'] for row in ordered],
         marker='o',
         markersize=2.5,
         linewidth=1.4,
-        label='test',
+        label='recursive elimination',
     )
     if frontier33 is not None:
-        axis.plot(
-            frontier33['features_kept'],
-            100 * frontier33['validation_accuracy'],
-            marker='*',
-            markeredgecolor='black',
-            markersize=12,
-            linestyle='none',
-            color='tab:blue',
-            label='published 33-feature set (validation)',
-        )
         axis.plot(
             frontier33['features_kept'],
             100 * frontier33['test_accuracy'],
@@ -541,12 +523,12 @@ def plot_scores(path: Path, rows: list[dict], frontier33: dict | None = None) ->
             markersize=12,
             linestyle='none',
             color='tab:orange',
-            label='published 33-feature set (test)',
+            label='published 33-feature set',
         )
     axis.set(
         xlabel='Features kept',
-        ylabel='Accuracy (%)',
-        title='Recursive feature elimination (C tuned at each step)',
+        ylabel='Test accuracy (%)',
+        title='Test accuracy by feature count (C tuned on validation)',
     )
     axis.grid(alpha=0.25)
     axis.legend()
