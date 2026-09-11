@@ -87,13 +87,12 @@ To rank all 389 EuroSAT features—including every spectral-tail region-shape me
 ## Development
 
 ```bash
-uv pip install --torch-backend auto -e ".[io,style,tests]"
+uv pip install --torch-backend auto -e ".[io,style]"
 ruff check
 ruff format --check
-python -m unittest discover -s tests -p 'test_torch_features.py'
 ```
 
-Ruff uses TorchGeo-style formatting and Google-style pydocstyle checks for the feature package, its CLI, and tests. There is no CI workflow.
+Ruff uses TorchGeo-style formatting and Google-style pydocstyle checks for the feature package and its CLI. There is no CI workflow.
 
 ## License
 

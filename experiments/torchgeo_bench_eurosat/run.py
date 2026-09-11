@@ -49,13 +49,22 @@ MODELS = {
     'dofa_large': 'torchgeo/dofa_large',
     'olmoearth_nano': 'olmoearth_v1_2_nano',
     'olmoearth_base': 'olmoearth_v1_2_base',
+    'resnet18': 'timm/resnet18',
+    'vit_base': 'timm/vit/vit_base_patch16_224',
+    'dofa_base': 'torchgeo/dofa_base',
+    'olmoearth_small': 'olmoearth_v1_2_small',
+    'earthloc_s2_resnet50': 'torchgeo/earthloc_s2_resnet50',
+    'resnet50_s2all_moco': 'torchgeo/resnet50_s2_all_moco',
 }
+DEFAULT_MODELS = ('resnet50', 'convnext_tiny', 'dofa_large', 'olmoearth_nano', 'olmoearth_base')
 FRACTIONS = (1, 2, 5, 10, 20, 50, 100)
 SPLITS = ('train', 'val', 'test')
 SAMPLING = 'nested_random_permutation_of_shuffled_embeddings_v1'
 DEFAULT_BATCH = {
     'resnet50': 64, 'convnext_tiny': 64, 'dofa_large': 16,
     'olmoearth_nano': 32, 'olmoearth_base': 32,
+    'resnet18': 64, 'vit_base': 64, 'dofa_base': 16, 'olmoearth_small': 32,
+    'earthloc_s2_resnet50': 64, 'resnet50_s2all_moco': 64,
 }
 logger = logging.getLogger(__name__)
 
@@ -288,7 +297,10 @@ def evaluation_jobs(model: str, dataset: str, fractions: bool, output: Path) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--models', nargs='+', choices=MODELS, default=list(MODELS))
+    model_selection = parser.add_mutually_exclusive_group()
+    model_selection.add_argument('--models', nargs='+', choices=MODELS)
+    model_selection.add_argument('--all-models', action='store_true',
+                                 help='run all eleven archived scoreboard backbones instead of the five overlap-study defaults')
     parser.add_argument('--download', action='store_true', help='download missing official EuroSAT data/splits')
     parser.add_argument('--fractions', action='store_true')
     parser.add_argument('--datasets', nargs='+', choices=('eurosat', 'eurosat-spatial'), default=['eurosat'])
@@ -314,7 +326,8 @@ def main() -> None:
         bench_data.symlink_to('EuroSAT', target_is_directory=True)
     if bench_data.resolve() != Path(DATA_ROOT).resolve():
         raise ValueError('data/eurosat must point to the checked data/EuroSAT download')
-    for model_key in args.models:
+    models = list(MODELS) if args.all_models else args.models or DEFAULT_MODELS
+    for model_key in models:
         for dataset in args.datasets:
             data, metadata = extract(model_key, dataset, args.device, args.workers,
                                      args.batch_size or DEFAULT_BATCH[model_key],
