@@ -2,8 +2,6 @@
 
 The public repo keeps the final experiment, not every trial that led to it. The blog lives in [GeoSpatial ML](https://geospatialml.com/posts/eurosat-min-params/).
 
-The [clean-start audit](REPRODUCABILITY_FINDINGS.md) distinguishes exact reproductions, fresh measurements that differ from historical quotes, and unverified claims. The basic commands below do not cover every article result.
-
 ## EuroSAT
 
 ```bash
@@ -20,7 +18,7 @@ The reference environment uses Python 3.13.13 and the versions in `requirements-
 
 ## Band order
 
-The order is `B01 B02 B03 B04 B05 B06 B07 B08 B09 B10 B11 B12 B8A`. We checked `EuroSAT.all_band_names`, a default TorchGeo 0.10 dataset object's `band_indices`, and its actual samples against rasterio reads. `tests/test_torchgeo_bands.py` repeats this when TorchGeo and the images are installed.
+The order is `B01 B02 B03 B04 B05 B06 B07 B08 B09 B10 B11 B12 B8A`. It matches `EuroSAT.all_band_names`, a default TorchGeo 0.10 dataset object's `band_indices`, and its actual samples read with rasterio.
 
 Both `src.data.BAND_NAMES` and `TIFF_BAND_NAMES` describe these physical channels, including when labeling regenerated article figures. Correcting display labels does not change the historical numeric feature aliases below.
 

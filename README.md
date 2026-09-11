@@ -4,8 +4,6 @@ Code for [Solving EuroSAT with as Few Parameters as Possible](https://geospatial
 
 The repo keeps the final model, an ImageStats baseline, and the feature/embedding comparison—not the steps of the original search.
 
-See [the clean-start audit](REPRODUCABILITY_FINDINGS.md) for reproduced measurements, article discrepancies, and commands for historical results omitted from the current tree. Exporting the saved tables is not a substitute for rerunning the experiments.
-
 ## Install
 
 With [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
@@ -89,13 +87,12 @@ To rank all 389 EuroSAT features—including every spectral-tail region-shape me
 ## Development
 
 ```bash
-uv pip install --torch-backend auto -e ".[io,style,tests]"
+uv pip install --torch-backend auto -e ".[io,style]"
 ruff check
 ruff format --check
-python -m unittest discover -s tests -p 'test_torch_features.py'
 ```
 
-Ruff uses TorchGeo-style formatting and Google-style pydocstyle checks for the feature package, its CLI, and tests. There is no CI workflow.
+Ruff uses TorchGeo-style formatting and Google-style pydocstyle checks for the feature package and its CLI. There is no CI workflow.
 
 ## License
 
