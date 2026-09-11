@@ -57,7 +57,7 @@ git show 924f0a80b27f4f2d8fdab4cdfcbd13515ee4989c:experiments/torchgeo_bench_eur
 
 Filter those archives to `method=linear`; their KNN rows were not plotted. The neural curves use one subsampling seed with conditional bootstrap intervals, whereas the handcrafted curves summarize five subsampling seeds.
 
-[`reproduced/fraction_comparison.csv`](reproduced/fraction_comparison.csv) is a historical comparison of original results with an earlier independent rerun, not output from the current invocation. Its 100% raw curve rows use the nested permutation, including the four non-Olmo random rows; those are not the separate full-scoreboard endpoints used by Figure 7. New measurements always go under `output/backbones/`, leaving these reference tables unchanged.
+New measurements go under `output/backbones/`, leaving the original reference tables unchanged.
 
 ## Inputs and compute profiles
 

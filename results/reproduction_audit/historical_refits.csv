@@ -1,5 +1,0 @@
-model,parameters,C,split,images,correct,accuracy,weights_identical,predictions_identical
-12_reference_class_linear,171,10.0,val,5400,5079,0.9405555555555556,True,True
-12_reference_class_linear,171,10.0,test,5400,5094,0.9433333333333334,True,True
-13_reference_class_95,279,10.0,val,5400,5147,0.9531481481481482,True,True
-13_reference_class_95,279,10.0,test,5400,5150,0.9537037037037037,True,True

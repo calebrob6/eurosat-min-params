@@ -45,11 +45,11 @@ The [backbone runner](experiments/torchgeo_bench_eurosat/README.md) extracts fro
 The 171- and 279-value checkpoints and their reference runner remain available at commit `924f0a80b27f4f2d8fdab4cdfcbd13515ee4989c`. To evaluate them without changing the current checkout, first prepare EuroSAT and the CPU environment with the commands above, then run from the repository root:
 
 ```bash
-git worktree add --detach output/reproduction-audit/historical \
+git worktree add --detach output/historical \
   924f0a80b27f4f2d8fdab4cdfcbd13515ee4989c
-ln -s ../../../data output/reproduction-audit/historical/data
-.venv-reproduce/bin/python output/reproduction-audit/historical/reproduce.py \
-  --check --output output/reproduction-audit/historical-models
+ln -s ../../data output/historical/data
+.venv-reproduce/bin/python output/historical/reproduce.py \
+  --check --output output/historical-models
 ```
 
 Use a fresh worktree path when repeating setup. This shares only the original downloaded images, not historical feature caches. The archived command evaluates all three saved local heads, fits ImageStats, and checks its own pinned reference tables. It does not repeat feature discovery. The same archival revision includes supporting baseline scripts and the neural learning-curve source tables; their historical and newly measured results must not be conflated.
