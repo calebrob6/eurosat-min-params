@@ -6,7 +6,15 @@ import torch
 from torch import nn
 
 from . import _ops as ops
-from ._schema import FRONTIER_NAMES, GROUPS, PAIRS, POOL_NAMES, STATS_NAMES
+from ._schema import (
+    EXTENDED_POOL_NAMES,
+    FRONTIER_NAMES,
+    GROUPS,
+    PAIRS,
+    POOL_NAMES,
+    REGION_SHAPE_NAMES,
+    STATS_NAMES,
+)
 
 
 class EuroSATFeatures(nn.Module):
@@ -36,28 +44,37 @@ class EuroSATFeatures(nn.Module):
     Empty batches return ``(0, num_features)``.
 
     Args:
-        feature_set: ``'33'`` (default), ``'377'``, or ``'52'``. The 33-feature
-            frontier consists of 32 pool columns and a separate region-shape
-            statistic, not a subset of the 377 pool. The 52 features are
-            per-band mean, population standard deviation, minimum, maximum.
+        feature_set: ``'33'`` (default), ``'377'``, ``'389'``, or ``'52'``.
+            The 377-feature recipe is the frozen historical pool. The extended
+            389-feature pool appends all 12 region-shape statistics. The
+            33-feature frontier consists of 32 historical-pool columns and one
+            region-shape statistic. The 52 features are per-band mean,
+            population standard deviation, minimum, maximum.
     """
 
     def __init__(self, feature_set: str = '33') -> None:
         """Initialize a frozen feature recipe and its fixed geometry.
 
         Args:
-            feature_set: Feature recipe identifier: ``'33'``, ``'377'``, or ``'52'``.
+            feature_set: Feature recipe identifier: ``'33'``, ``'377'``,
+                ``'389'``, or ``'52'``.
 
         Raises:
             ValueError: If the feature recipe identifier is unsupported.
         """
         super().__init__()
-        if not isinstance(feature_set, str) or feature_set not in ('33', '377', '52'):
-            raise ValueError("feature_set must be '33', '377', or '52'")
+        if not isinstance(feature_set, str) or feature_set not in (
+            '33',
+            '377',
+            '389',
+            '52',
+        ):
+            raise ValueError("feature_set must be '33', '377', '389', or '52'")
         self._feature_set = feature_set
         self._feature_names = {
             '33': FRONTIER_NAMES,
             '377': POOL_NAMES,
+            '389': EXTENDED_POOL_NAMES,
             '52': STATS_NAMES,
         }[feature_set]
         bins = None
@@ -75,7 +92,7 @@ class EuroSATFeatures(nn.Module):
         """Return immutable ordered feature identifiers.
 
         Returns:
-            Feature names, including duplicate correlations in the 377 pool.
+            Feature names, including duplicate historical-pool correlations.
         """
         return self._feature_names
 
@@ -335,8 +352,15 @@ class EuroSATFeatures(nn.Module):
                 raise AssertionError(group)
             for i in selected:
                 values[names[i]] = result[:, i]
-        if 'tail_aniso_low_ndvi' in wanted:
+        selected_region = [
+            i for i, name in enumerate(REGION_SHAPE_NAMES) if name in wanted
+        ]
+        if selected_region == [4]:
             values['tail_aniso_low_ndvi'] = ops.tail_anisotropy(maps()[:, 0])
+        elif selected_region:
+            result = ops.tail_region_shape(channels((0, 1, 2)))
+            for i in selected_region:
+                values[REGION_SHAPE_NAMES[i]] = result[:, i]
         return torch.stack([values[name] for name in self.feature_names], -1)
 
     @staticmethod

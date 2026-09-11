@@ -9,34 +9,26 @@ import numpy as np
 
 from reproduce import CHECKSUMS, prepare_data
 from src.data import CLASSES, DATA_ROOT, TIFF_BAND_NAMES, iter_images, list_split
-from src.extra_features import (
-    blob_features, index_coherence, index_texture_scale2, lbp_features,
-    orient_entropy_scale2, sslope_features, xband_corr,
-)
+from src.feature_pool import historical_pool_features
 from src.features import patch_features
 from src.frontier import CORE_CONFIG, POOL_INDICES, frontier_features
 
 from .protocol import (
-    BENCH_REVISION, MODELS, REPRESENTATIONS, ROOT, SIZES,
-    json_value, save_npz, sha256, write_json,
+    BENCH_REVISION,
+    MODELS,
+    REPRESENTATIONS,
+    ROOT,
+    SIZES,
+    json_value,
+    save_npz,
+    sha256,
+    write_json,
 )
 
 logger = logging.getLogger(__name__)
 SOURCE_FILES = (
-    'src/data.py', 'src/features.py', 'src/frontier.py',
+    'src/data.py', 'src/features.py', 'src/feature_pool.py', 'src/frontier.py',
     'src/extra_features.py', 'experiments/representation_overlap/data.py',
-)
-CORE_GROUPS = (
-    ('spectral_statistics', 91), ('multiscale_gradients', 78), ('coherence', 26),
-    ('orientation_entropy', 13), ('orientation_histogram', 52), ('spectral_peaks', 13),
-    ('cross_band', 8), ('index_texture', 24), ('hough_lines', 9), ('harris_corners', 6),
-)
-EXTRA_FAMILIES = (
-    ('lbp', lbp_features, 6), ('blobs', blob_features, 9),
-    ('spectral_slope', sslope_features, 3), ('index_coherence', index_coherence, 6),
-    ('index_texture_scale2', index_texture_scale2, 12),
-    ('cross_band_correlation', xband_corr, 8),
-    ('orientation_entropy_scale2', orient_entropy_scale2, 13),
 )
 
 
@@ -81,16 +73,7 @@ def feature_matrices(images: np.ndarray, *, b10_zeroed: bool = False) -> tuple[d
     core = patch_features(images, **CORE_CONFIG)
     if core[0].shape[1] != 320:
         raise ValueError('core schema is no longer 320 columns')
-    parts, names = [core[0]], list(core[1])
-    groups = [group for group, width in CORE_GROUPS for _ in range(width)]
-    for group, function, width in EXTRA_FAMILIES:
-        values, family_names = function(images)
-        if values.shape[1] != width or len(family_names) != width:
-            raise ValueError(f'{group}: unexpected feature width')
-        parts.append(values)
-        names.extend(family_names)
-        groups.extend([group] * width)
-    pool = np.concatenate(parts, axis=1).astype(np.float32)
+    pool, names, groups = historical_pool_features(images, core)
     frontier, frontier_names = frontier_features(images, core)
     np.testing.assert_array_equal(frontier[:, :32], pool[:, POOL_INDICES])
     flat = images.reshape(len(images), 13, -1)

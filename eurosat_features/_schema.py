@@ -114,6 +114,13 @@ GROUPS = (
     ('orientation_entropy_scale2', tuple(f'oent2_b{i}' for i in range(13))),
 )
 POOL_NAMES = tuple(name for _, names in GROUPS for name in names)
+REGION_SHAPE_NAMES = tuple(
+    f'tail_{stat}_{tail}_{channel}'
+    for channel in CHANNELS
+    for tail in ('low', 'high')
+    for stat in ('aniso', 'spread')
+)
+EXTENDED_POOL_NAMES = POOL_NAMES + REGION_SHAPE_NAMES
 FRONTIER_NAMES = tuple(POOL_NAMES[i] for i in POOL_INDICES) + ('tail_aniso_low_ndvi',)
 STATS_NAMES = tuple(
     f'{stat}_{band}'
