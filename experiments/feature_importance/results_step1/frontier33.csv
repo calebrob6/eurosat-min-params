@@ -1,0 +1,2 @@
+features_kept,reference_class_parameters,C,train_accuracy,validation_accuracy,test_accuracy,max_iterations_used
+33,306,3.0,0.967283950617284,0.9616666666666667,0.9603703703703703,117
