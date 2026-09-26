@@ -16,7 +16,7 @@ The main comparisons use the frozen 33-feature frontier and historical 377-featu
 
 **The ResNet-50 H377 reconstruction is unstable.** Its native R-squared is 23.6%, with a wide 95% bootstrap interval of -1.1% to 36.7%, despite a 34.3% validation score. A post-hoc inspection of the frozen predictions found that `Industrial_2434.tif` alone contributes 15.0% of the total reconstruction squared error; its predicted embedding norm is approximately 123.2 versus an actual norm of 29.3. Several handcrafted coordinates are extreme relative to their training standard deviations. No images were removed, features clipped, or regularization retuned after this observation. This is a concrete warning against interpreting squared-error explanation percentages as robust fractions of information.
 
-All primary, null, band-control, class-conditioned, and named-feature results are retained under [results/](results/). The historical article measurements and checkpoints are unchanged.
+All primary, null, band-control, class-conditioned, and named-feature results are retained under [results/](results/). They were computed with an earlier NumPy implementation of the handcrafted features and use its feature names; [`feature_names.csv`](../eurosat/results/feature_names.csv) maps them to the names in [`patch_features.py`](../../patch_features.py), which the runner now uses.
 
 ## Run
 

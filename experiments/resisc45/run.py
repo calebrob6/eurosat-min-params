@@ -19,9 +19,13 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.errors import NotGeoreferencedWarning
 
-from src.linmodel import fit_folded_logreg, predict, predict_reference_class, to_reference_class
+import torch
+
+from experiments.data import default_device
+from experiments.linear import fit_folded_logreg, predict, stored_parameters, to_reference_class
+from patch_features import PatchFeatures
+
 from .download import prepare_dataset
-from .rgb import SELECTED_INDICES, rgb_feature_pool
 
 ROOT = Path(__file__).resolve().parents[2]
 SPLITS = ('train', 'val', 'test')
@@ -32,6 +36,19 @@ SPLIT_SHA256 = (
     'e0927e80130b47317a2f18520d98382b6fc56f0d3edd3345140f7d02267c3805',
 )
 CS = (.01, .03, .1, .3, 1, 3, 10, 30, 100, 300, 1000, 3000, 10000)
+BANDS = ('red', 'green', 'blue')
+IMAGESTATS = tuple(f'{stat}_{band}' for band in BANDS for stat in ('mean', 'std', 'min', 'max'))
+# Selected from an RGB feature pool at 64x64 with the same L1 ranking as EuroSAT.
+SELECTED_33 = (
+    'grad_std_blue', 'grad_mean_ngbdi', 'p90_blue', 'grad_std_nrbdi', 'grad_std_lightness',
+    'p50_green', 'p10_blue', 'grad_mean_red', 'grad_std_green', 'grad_std_s2_blue', 'mean_red',
+    'grad_mean_s2_blue', 'mean_blue', 'p75_red', 'fft_slope_pan', 'grad_mean_blue',
+    'orient_entropy_blue', 'spread_ngrdi', 'grad_mean_s2_red', 'corner_mag_saturation',
+    'orient_entropy_red', 'grad_mean_s1_red', 'grad_mean_s1_ngbdi', 'p10_green', 'p50_blue',
+    'corner_frac_pan', 'lbp_entropy_pan', 'grad_mean_s2_green', 'grad_mean_saturation',
+    'grad_std_s1_blue', 'lbp_entropy_saturation', 'grad_std_red', 'grad_std_s1_green',
+)  # fmt: skip
+FEATURE_SETS = {'imagestats': IMAGESTATS, 'selected33': SELECTED_33}
 
 
 def split_records(root: Path) -> tuple[dict, tuple[str, ...]]:
@@ -76,23 +93,16 @@ def read_image(path: Path) -> np.ndarray:
     return image
 
 
-def image_statistics(images: np.ndarray) -> np.ndarray:
-    """Return per-band mean, population standard deviation, minimum, and maximum."""
-    flat = images.astype(np.float32).reshape(len(images), 3, -1)
-    return np.stack((flat.mean(2), flat.std(2), flat.min(2), flat.max(2)), axis=2).reshape(len(images), 12)
-
-
-def extract(record: dict, batch_size: int) -> dict:
+def extract(record: dict, batch_size: int, device: str) -> dict:
     """Compute both feature sets in bounded batches from original images."""
-    statistics, pool = [], []
-    names = None
+    extractors = {key: PatchFeatures(BANDS, names).to(device) for key, names in FEATURE_SETS.items()}
+    parts = {key: [] for key in extractors}
     for start in range(0, len(record['paths']), batch_size):
         images = np.stack([read_image(path) for path in record['paths'][start:start + batch_size]])
-        statistics.append(image_statistics(images))
-        values, names = rgb_feature_pool(images)
-        pool.append(values)
-    return {**record, 'imagestats': np.concatenate(statistics),
-            'selected33': np.concatenate(pool), 'pool_names': names}
+        x = torch.from_numpy(images).to(device)
+        for key, extractor in extractors.items():
+            parts[key].append(extractor(x).cpu().numpy())
+    return {**record, **{key: np.concatenate(values) for key, values in parts.items()}}
 
 
 def main() -> None:
@@ -102,6 +112,7 @@ def main() -> None:
     parser.add_argument('--output', type=Path, default=ROOT / 'output/resisc45')
     parser.add_argument('--download', action='store_true')
     parser.add_argument('--batch-size', type=int, default=256)
+    parser.add_argument('--device', default=default_device())
     args = parser.parse_args()
     if args.batch_size < 1:
         parser.error('--batch-size must be positive')
@@ -113,38 +124,28 @@ def main() -> None:
     if args.download:
         prepare_dataset(args.root, SPLIT_SHA256)
     records, classes = split_records(args.root)
-    train, val = (extract(records[split], args.batch_size) for split in ('train', 'val'))
+    train, val = (extract(records[split], args.batch_size, args.device) for split in ('train', 'val'))
     fitted = {}
-    for key, indices, grid in (
-        ('imagestats', np.arange(12), CS),
-        ('selected33', np.asarray(SELECTED_INDICES), (30.0,)),
-    ):
+    for key, grid in (('imagestats', CS), ('selected33', (30.0,))):
         best = None
         for c in grid:
-            model = fit_folded_logreg(train[key], train['labels'], indices, C=c)
-            score = float((predict(val[key], *model) == val['labels']).mean())
+            head = to_reference_class(*fit_folded_logreg(train[key], train['labels'], C=c))
+            score = float((predict(val[key], *head) == val['labels']).mean())
             if best is None or score > best[0]:
-                best = (score, c, model)
+                best = (score, c, head)
         fitted[key] = best
-    test = extract(records['test'], args.batch_size)
+    test = extract(records['test'], args.batch_size, args.device)
     output.mkdir(parents=True, exist_ok=True)
     rows = []
-    for key, (_, c, (w, b, indices)) in fitted.items():
-        wr, br = to_reference_class(w, b)
-        feature_names = (
-            [train['pool_names'][i] for i in indices] if key == 'selected33'
-            else [f'{stat}_{band}' for band in ('red', 'green', 'blue') for stat in ('mean', 'std', 'min', 'max')]
-        )
-        np.savez_compressed(output / f'{key}.npz', W=wr, b=br, feature_idx=indices,
-                            feature_names=np.asarray(feature_names), C=c, ref_class=0,
-                            classes=np.asarray(classes), preprocessing='rasterio bilinear RGB uint8 64x64')
+    for key, (_, c, (w, b)) in fitted.items():
+        np.savez_compressed(output / f'{key}.npz', W=w, b=b, feature_names=np.asarray(FEATURE_SETS[key]),
+                            C=c, classes=np.asarray(classes), preprocessing='rasterio bilinear RGB uint8 64x64')
+        parameters = stored_parameters(w, b)
         for split, data in (('val', val), ('test', test)):
-            predictions = predict_reference_class(data[key], wr, br, indices)
-            correct = int((predictions == data['labels']).sum())
-            rows.append(dict(model=key, split=split, features=len(indices),
-                             learned_parameters=wr.size + br.size, C=c, n_images=len(predictions),
-                             correct=correct, accuracy=correct / len(predictions)))
-            print(f'{key} {split}: {100 * correct / len(predictions):.2f}% ({wr.size + br.size} values)', flush=True)
+            correct = int((predict(data[key], w, b) == data['labels']).sum())
+            rows.append(dict(model=key, split=split, features=w.shape[1], learned_parameters=parameters, C=c,
+                             n_images=len(data['labels']), correct=correct, accuracy=correct / len(data['labels'])))
+            print(f'{key} {split}: {100 * correct / len(data["labels"]):.2f}% ({parameters} values)', flush=True)
     with (output / 'results.csv').open('w', newline='') as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator='\n')
         writer.writeheader()

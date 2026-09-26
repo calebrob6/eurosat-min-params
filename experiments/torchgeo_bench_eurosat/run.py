@@ -38,7 +38,7 @@ from torchgeo_bench.main import embed_split, evaluate_logistic, resolve_model_co
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from reproduce import CHECKSUMS, DATA_ROOT, prepare_data
+from experiments.data import CHECKSUMS, DATA_ROOT, prepare_data
 
 REVISION = '9c8e4afab46675d7279c88828dfcbf0ca99b3a07'
 SOURCE = ROOT / 'output/torchgeo-bench'
@@ -320,7 +320,7 @@ def main() -> None:
     if not torch.cuda.is_available():
         raise RuntimeError('this benchmark configuration requires CUDA')
     check_source()
-    prepare_data(args.download, 'eurosat-spatial' in args.datasets)
+    prepare_data(args.download)
     bench_data = ROOT / 'data/eurosat'
     if not bench_data.exists():
         bench_data.symlink_to('EuroSAT', target_is_directory=True)

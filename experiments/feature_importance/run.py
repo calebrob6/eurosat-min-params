@@ -27,22 +27,15 @@ from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
-from reproduce import CHECKSUMS, prepare_data
-from src.data import CLASSES, iter_images, list_split
-from src.feature_pool import FULL_POOL_SIZE, full_pool_features
-from src.frontier import POOL_INDICES
+from experiments.data import CHECKSUMS, CLASSES, default_device, extract, list_split, prepare_data
+from patch_features import EUROSAT_33, EUROSAT_389, EuroSATFeatures
 
 ROOT = Path(__file__).resolve().parents[2]
 SPLITS = ('train', 'val', 'test')
 SIZES = {'train': 16200, 'val': 5400, 'test': 5400}
 DEFAULT_CS = (0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0, 300.0)
-SOURCE_FILES = (
-    'src/data.py',
-    'src/features.py',
-    'src/extra_features.py',
-    'src/frontier.py',
-    'src/feature_pool.py',
-)
+FULL_POOL_SIZE = len(EUROSAT_389)
+SOURCE_FILES = ('patch_features.py', 'experiments/data.py')
 
 
 @dataclass
@@ -79,7 +72,7 @@ def write_csv(path: Path, rows: list[dict]) -> None:
 def cache_identity() -> dict:
     """Describe every source and split input that defines cached features."""
     return {
-        'schema': 'eurosat-full-pool-389-v2',
+        'schema': 'eurosat-full-pool-389-v3',
         'source_sha256': {name: sha256(ROOT / name) for name in SOURCE_FILES},
         'split_sha256': {name: CHECKSUMS[f'eurosat-{name}.txt'] for name in SPLITS},
     }
@@ -122,11 +115,11 @@ def load_manifest(cache: Path) -> dict:
     return manifest
 
 
-def prepare_cache(cache: Path, batch_size: int, download: bool) -> dict:
+def prepare_cache(cache: Path, batch_size: int, download: bool, device: str) -> dict:
     """Extract all 389 features from original TIFFs into an authenticated cache."""
     if batch_size < 1:
         raise ValueError('batch_size must be positive')
-    prepare_data(download, False)
+    prepare_data(download)
     manifest_path = cache / 'manifest.json'
     if manifest_path.exists():
         manifest = load_manifest(cache)
@@ -138,7 +131,8 @@ def prepare_cache(cache: Path, batch_size: int, download: bool) -> dict:
             f'{cache}: incomplete cache is not overwritten; choose a new cache'
         )
 
-    schema = None
+    pool = EuroSATFeatures('389')
+    schema = {'names': list(pool.feature_names), 'families': list(pool.feature_families)}
     for split in SPLITS:
         paths, labels = list_split(split)
         if (
@@ -147,23 +141,7 @@ def prepare_cache(cache: Path, batch_size: int, download: bool) -> dict:
             or len(set(paths)) != SIZES[split]
         ):
             raise ValueError(f'{split}: invalid split membership')
-        parts = []
-        seen = 0
-        for images, batch_labels in iter_images(split, batch_size):
-            if not np.array_equal(batch_labels, labels[seen : seen + len(images)]):
-                raise ValueError(f'{split}: TIFF iterator labels changed')
-            values, names, families = full_pool_features(images)
-            current_schema = {'names': names, 'families': families}
-            if schema is not None and current_schema != schema:
-                raise ValueError(
-                    'feature names or family order changed between batches'
-                )
-            schema = current_schema
-            parts.append(values)
-            seen += len(images)
-            if seen % (batch_size * 10) == 0:
-                print(f'{split}: extracted {seen}/{len(paths)}', flush=True)
-        features = np.concatenate(parts)
+        features = extract({'389': pool}, split, device, batch_size)['389']
         if (
             features.shape != (SIZES[split], FULL_POOL_SIZE)
             or not np.isfinite(features).all()
@@ -443,15 +421,8 @@ def recursive_elimination(
 
 def frontier33_indices(names: list[str]) -> np.ndarray:
     """Map the exact published 33-feature set into the 389-column pool."""
-    matches = [
-        index for index, name in enumerate(names) if name == 'tail_aniso_low_ndvi'
-    ]
-    if len(matches) != 1 or matches[0] < 377:
-        raise ValueError(
-            'full pool does not contain one region-shape tail_aniso_low_ndvi'
-        )
-    indices = np.append(POOL_INDICES, matches[0]).astype(np.int64)
-    if len(indices) != 33 or len(set(indices.tolist())) != 33:
+    indices = np.asarray([names.index(name) for name in EUROSAT_33], dtype=np.int64)
+    if len(set(indices.tolist())) != 33 or indices[-1] < 377:
         raise ValueError('invalid published 33-feature mapping')
     return indices
 
@@ -624,12 +595,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--download', action='store_true')
     parser.add_argument(
-        '--cache', type=Path, default=ROOT / 'output/feature-importance-cache-v2'
+        '--cache', type=Path, default=ROOT / 'output/feature-importance-cache-v3'
     )
     parser.add_argument(
         '--output', type=Path, default=ROOT / 'output/feature-importance'
     )
-    parser.add_argument('--batch-size', type=int, default=128)
+    parser.add_argument('--device', default=default_device())
+    parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--step', type=int, default=5)
     parser.add_argument('--minimum-features', type=int, default=4)
     parser.add_argument('--max-iter', type=int, default=4000)
@@ -658,7 +630,7 @@ def main() -> None:
     if tuple(sorted(set(c_grid))) != c_grid or any(c <= 0 for c in c_grid):
         parser.error('--c-grid must be positive, unique, and sorted ascending')
 
-    manifest = prepare_cache(cache, args.batch_size, args.download)
+    manifest = prepare_cache(cache, args.batch_size, args.download, args.device)
     datasets, manifest = load_splits(cache)
     reference_indices = frontier33_indices(manifest['schema']['names'])
     output.mkdir(parents=True, exist_ok=True)
