@@ -6,12 +6,10 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import torch
 
-from reproduce import CHECKSUMS, prepare_data
-from src.data import CLASSES, DATA_ROOT, TIFF_BAND_NAMES, iter_images, list_split
-from src.feature_pool import historical_pool_features
-from src.features import patch_features
-from src.frontier import CORE_CONFIG, POOL_INDICES, frontier_features
+from experiments.data import CHECKSUMS, CLASSES, DATA_ROOT, default_device, iter_images, list_split, prepare_data
+from patch_features import EUROSAT_377, EUROSAT_BANDS, EuroSATFeatures
 
 from .protocol import (
     BENCH_REVISION,
@@ -26,10 +24,8 @@ from .protocol import (
 )
 
 logger = logging.getLogger(__name__)
-SOURCE_FILES = (
-    'src/data.py', 'src/features.py', 'src/feature_pool.py', 'src/frontier.py',
-    'src/extra_features.py', 'experiments/representation_overlap/data.py',
-)
+SOURCE_FILES = ('patch_features.py', 'experiments/data.py', 'experiments/representation_overlap/data.py')
+EXTRACTORS = {'frontier33': '33', 'pool377': '377', 'imagestats52': '52'}
 
 
 def canonical_names(split: str) -> tuple[np.ndarray, np.ndarray]:
@@ -64,34 +60,26 @@ def align(
     return result
 
 
-def feature_matrices(images: np.ndarray, *, b10_zeroed: bool = False) -> tuple[dict, dict]:
-    if images.dtype != np.float32 or images.ndim != 4 or images.shape[1:] != (13, 64, 64):
-        raise ValueError('expected float32 TIFF-order images of shape (N,13,64,64)')
+def feature_matrices(
+    images: np.ndarray, extractors: dict, device: str, *, b10_zeroed: bool = False
+) -> tuple[dict, dict]:
+    if images.ndim != 4 or images.shape[1:] != (13, 64, 64):
+        raise ValueError('expected TIFF-order images of shape (N,13,64,64)')
+    x = torch.from_numpy(np.ascontiguousarray(images, dtype=np.float32)).to(device)
     if b10_zeroed:
-        images = images.copy()
-        images[:, TIFF_BAND_NAMES.index('B10')] = 0
-    core = patch_features(images, **CORE_CONFIG)
-    if core[0].shape[1] != 320:
-        raise ValueError('core schema is no longer 320 columns')
-    pool, names, groups = historical_pool_features(images, core)
-    frontier, frontier_names = frontier_features(images, core)
-    np.testing.assert_array_equal(frontier[:, :32], pool[:, POOL_INDICES])
-    flat = images.reshape(len(images), 13, -1)
-    stats = np.stack((flat.mean(2), flat.std(2), flat.min(2), flat.max(2)), axis=2).reshape(len(images), 52)
-    matrices = {'frontier33': frontier, 'pool377': pool, 'imagestats52': stats}
+        x = x.clone()
+        x[:, EUROSAT_BANDS.index('B10')] = 0
+    matrices = {rep: extractor(x).cpu().numpy() for rep, extractor in extractors.items()}
     schema = {
-        'frontier33': {
-            'names': frontier_names,
-            'families': [groups[index] for index in POOL_INDICES] + ['region_shape'],
-            'pool_indices': [int(x) for x in POOL_INDICES] + [None],
-        },
-        'pool377': {'names': names, 'families': groups, 'pool_indices': list(range(377))},
-        'imagestats52': {
-            'names': [f'{stat}_{band}' for band in TIFF_BAND_NAMES for stat in ('mean', 'std', 'min', 'max')],
-            'families': ['image_statistics'] * 52,
-            'pool_indices': [None] * 52,
-        },
+        rep: {
+            'names': list(extractor.feature_names),
+            'families': list(extractor.feature_families),
+            'pool_indices': [EUROSAT_377.index(n) if n in EUROSAT_377 else None for n in extractor.feature_names]
+            if rep != 'imagestats52' else [None] * 52,
+        }
+        for rep, extractor in extractors.items()
     }
+    schema['pool377']['pool_indices'] = list(range(377))
     for key, width in REPRESENTATIONS.items():
         if matrices[key].shape != (len(images), width) or not np.isfinite(matrices[key]).all():
             raise ValueError(f'{key}: invalid handcrafted features')
@@ -100,22 +88,23 @@ def feature_matrices(images: np.ndarray, *, b10_zeroed: bool = False) -> tuple[d
 
 def extraction_identity() -> dict:
     return json_value({
-        'schema': 'raw-handcrafted-overlap-v1',
+        'schema': 'raw-handcrafted-overlap-v2',
         'source_sha256': {path: sha256(ROOT / path) for path in SOURCE_FILES},
-        'core_config': CORE_CONFIG,
-        'physical_bands': TIFF_BAND_NAMES,
+        'physical_bands': EUROSAT_BANDS,
         'legacy_index_bands': {'swir1': 'B12', 'swir2': 'B8A'},
         'split_sha256': {name: digest for name, digest in CHECKSUMS.items()
                          if name.startswith('eurosat-') and not name.startswith('eurosat-spatial-')},
         'variants': ['original', 'b10_zeroed'],
-        'numpy': np.__version__,
+        'torch': torch.__version__,
     })
 
 
-def prepare(cache: Path, batch_size: int = 128, *, download: bool = False) -> None:
+def prepare(cache: Path, batch_size: int = 128, *, download: bool = False, device: str | None = None) -> None:
     if batch_size < 1:
         raise ValueError('batch size must be positive')
-    prepare_data(download, False)
+    prepare_data(download)
+    device = device or default_device()
+    extractors = {rep: EuroSATFeatures(key).to(device) for rep, key in EXTRACTORS.items()}
     identity = extraction_identity()
     manifest_path = cache / 'features.json'
     if manifest_path.exists():
@@ -138,7 +127,9 @@ def prepare(cache: Path, batch_size: int = 128, *, download: bool = False) -> No
             if not np.array_equal(batch_labels, labels[seen:seen + len(images)]):
                 raise ValueError('TIFF iterator labels changed')
             for variant in values:
-                matrices, current = feature_matrices(images, b10_zeroed=variant == 'b10_zeroed')
+                matrices, current = feature_matrices(
+                    images, extractors, device, b10_zeroed=variant == 'b10_zeroed'
+                )
                 if schema is not None and current != schema:
                     raise ValueError('feature names or family order changed between batches')
                 schema = current
@@ -154,9 +145,6 @@ def prepare(cache: Path, batch_size: int = 128, *, download: bool = False) -> No
                      **{rep: np.concatenate(parts) for rep, parts in reps.items()})
     if len(set(all_names)) != sum(SIZES.values()):
         raise ValueError('canonical splits overlap')
-    with np.load(ROOT / 'models/eurosat_33.npz', allow_pickle=False) as model:
-        if schema['frontier33']['names'] != model['feature_names'].tolist():
-            raise ValueError('frontier names differ from the published checkpoint')
     write_json(manifest_path, {
         'identity': identity,
         'schema': schema,
@@ -208,7 +196,7 @@ def backbone_metadata(model: str, cache: Path, metadata_dir: Path) -> dict:
         name = f'eurosat-{split}.txt'
         if metadata['dataset_split_sha256'][name] != CHECKSUMS[name]:
             raise ValueError(f'{model}: wrong {split} split checksum')
-    expected_bands = [band for band in TIFF_BAND_NAMES if not (model.startswith('olmoearth') and band == 'B10')]
+    expected_bands = [band for band in EUROSAT_BANDS if not (model.startswith('olmoearth') and band == 'B10')]
     if metadata['used_bands'] != expected_bands:
         raise ValueError(f'{model}: unexpected physical bands')
     if sha256(cache / f'{model}_eurosat.npz') != metadata['embedding_sha256']:

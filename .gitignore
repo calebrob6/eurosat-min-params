@@ -10,11 +10,15 @@ lightning_logs/
 __pycache__/
 *.py[cod]
 .venv/
+.venv-*/
+.ruff_cache/
 *.egg-info/
-/build/
-/dist/
 
-# Local blog sources and environment files.
+# Local blog checkout, sources, diagnostics, and environment files.
+/geospatialml/
 /blog_post/
+/blog_post.txt
+/report.*.json
+/.gnhf/
 /.env
 /.env.*

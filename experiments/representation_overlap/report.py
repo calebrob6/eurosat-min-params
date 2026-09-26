@@ -4,7 +4,6 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-import re
 
 import matplotlib
 
@@ -12,7 +11,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from src.data import TIFF_BAND_NAMES
+from patch_features import EUROSAT_BANDS as TIFF_BAND_NAMES
 
 from .protocol import sha256, write_json
 
@@ -30,9 +29,8 @@ def physical_definition(name: str) -> str:
     for index, definition in INDEX_DEFINITIONS.items():
         if index in name:
             return definition
-    bands = re.findall(r'(?:^|_)b(\d+)', name)
-    if bands:
-        return ';'.join(TIFF_BAND_NAMES[int(index)] for index in bands)
+    if name.startswith('corr_'):
+        return ';'.join(name.split('_')[1:])
     if 'pan' in name:
         return 'mean of all 13 TIFF channels; B10 fixed to zero in b10_zeroed variant'
     for band in TIFF_BAND_NAMES:

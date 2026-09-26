@@ -20,9 +20,9 @@ Install the environment described in the root README, then run from the reposito
 python -m experiments.feature_importance.run --download
 ```
 
-Feature extraction is cached under `output/feature-importance-cache-v2/`; subsequent runs authenticate and reuse it. Results go to `output/feature-importance/`. Both paths must remain under `output/`, and a nonempty results directory is never overwritten.
+Feature extraction uses `EuroSATFeatures('389')` from [`patch_features.py`](../../patch_features.py) (on the GPU if available; set `--device`) and is cached under `output/feature-importance-cache-v3/`; subsequent runs authenticate and reuse it. Results go to `output/feature-importance/`. Both paths must remain under `output/`, and a nonempty results directory is never overwritten.
 
-The completed reference run is checked in under [`results/`](results/), including the full importance table and both plots.
+The completed reference run is checked in under [`results/`](results/), including the full importance table and both plots. It used an earlier NumPy implementation of the same features and their earlier names; [`feature_names.csv`](../eurosat/results/feature_names.csv) maps those names to the current ones. A fresh run with the PyTorch module lands within a fraction of a point: the full 389-feature model scores 96.70% validation and 96.85% test, against the recorded 96.69% and 96.76%.
 
 The one-feature-at-a-time follow-up is checked in separately under [`results_step1/`](results_step1/). It evaluates every retained-feature count, including a direct comparison between the recursive and published 33-feature sets.
 

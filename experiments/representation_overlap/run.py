@@ -477,14 +477,14 @@ def main() -> None:
     if args.stage == 'all':
         if args.pilot or args.component != 'all':
             parser.error('the all stage requires a complete, non-pilot study')
-        data.prepare(args.cache, args.batch_size, download=args.download)
+        data.prepare(args.cache, args.batch_size, download=args.download, device=args.device)
         select(args)
         lock_selection(args)
         evaluate(args)
         from .report import export
         export(args.output, args.export)
     elif args.stage == 'prepare':
-        data.prepare(args.cache, args.batch_size, download=args.download)
+        data.prepare(args.cache, args.batch_size, download=args.download, device=args.device)
     elif args.stage == 'select':
         select(args)
     elif args.stage == 'lock':
